@@ -1,0 +1,164 @@
+{
+  "projectType": "data-platform",
+  "projectName": "DuckDB",
+  "projectDescription": "An analytical in-process SQL database management system designed for fast, reliable, and portable data analytics.",
+  "theme": "aspen",
+  "primaryColor": "#FFC300",
+  "lightColor": "#FFD54F",
+  "darkColor": "#FF8F00",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/data-types",
+              "concepts/storage",
+              "concepts/query-execution"
+            ]
+          },
+          {
+            "group": "SQL Guide",
+            "pages": [
+              "sql/overview",
+              "sql/data-import",
+              "sql/queries",
+              "sql/functions",
+              "sql/window-functions",
+              "sql/joins"
+            ]
+          },
+          {
+            "group": "Data Import & Export",
+            "pages": [
+              "data/overview",
+              "data/csv",
+              "data/parquet",
+              "data/json"
+            ]
+          },
+          {
+            "group": "Extensions",
+            "pages": [
+              "extensions/overview",
+              "extensions/core-extensions",
+              "extensions/loading",
+              "extensions/building"
+            ]
+          },
+          {
+            "group": "Performance",
+            "pages": [
+              "performance/optimization",
+              "performance/indexing",
+              "performance/benchmarks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "C API",
+            "pages": [
+              "api/c/overview",
+              "api/c/connection",
+              "api/c/query",
+              "api/c/prepared-statements",
+              "api/c/appender",
+              "api/c/data-types"
+            ]
+          },
+          {
+            "group": "C++ API",
+            "pages": [
+              "api/cpp/overview",
+              "api/cpp/database",
+              "api/cpp/connection",
+              "api/cpp/query-result"
+            ]
+          },
+          {
+            "group": "Embedded Examples",
+            "pages": [
+              "api/examples/c-examples",
+              "api/examples/cpp-examples",
+              "api/examples/python-examples"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI",
+        "groups": [
+          {
+            "group": "Command Line",
+            "pages": [
+              "cli/overview",
+              "cli/commands",
+              "cli/configuration",
+              "cli/meta-commands"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/building",
+              "development/testing",
+              "development/architecture",
+              "development/contributing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "In-process analytical SQL database",
+    "Rich SQL dialect with nested queries and window functions",
+    "Complex data types (arrays, structs, maps)",
+    "Fast analytical query performance",
+    "Embedded C/C++ API",
+    "CLI tool for interactive queries",
+    "Extension system (Parquet, JSON, ICU)",
+    "Native CSV and Parquet file support",
+    "Multiple language bindings (Python, R, Java)"
+  ],
+  "publicApiSurface": [
+    "duckdb_open",
+    "duckdb_connect",
+    "duckdb_query",
+    "duckdb_prepare",
+    "duckdb_execute_prepared",
+    "duckdb_appender_create",
+    "duckdb_result",
+    "duckdb::Database",
+    "duckdb::Connection",
+    "duckdb::MaterializedQueryResult",
+    "CREATE TABLE",
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "COPY",
+    "INSTALL",
+    "LOAD"
+  ]
+}
