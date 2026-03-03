@@ -1,0 +1,489 @@
+---
+title: Data Types
+description: Complete reference for DuckDB's data type system
+---
+
+DuckDB provides a rich type system that includes traditional SQL types, modern analytical types, and complex nested types. All types are defined in the C API header [`duckdb.h`](https://github.com/duckdb/duckdb/blob/main/src/include/duckdb.h).
+
+## Type System Overview
+
+DuckDB's type system is defined by the `DUCKDB_TYPE` enum in `src/include/duckdb.h:61-141`. Types are divided into several categories:
+
+- **Numeric Types**: Integers, floating-point, decimals
+- **String Types**: Text and binary data
+- **Temporal Types**: Dates, times, timestamps, intervals
+- **Boolean Type**: TRUE/FALSE values
+- **Complex Types**: Lists, structs, maps, arrays
+- **Special Types**: UUIDs, enums, unions
+
+## Numeric Types
+
+### Integer Types
+
+DuckDB supports both signed and unsigned integers in multiple sizes:
+
+| Type | SQL Name | C Type | Range | Enum Value |
+|------|----------|--------|-------|------------|
+| Signed 8-bit | `TINYINT` | `int8_t` | -128 to 127 | `DUCKDB_TYPE_TINYINT` |
+| Signed 16-bit | `SMALLINT` | `int16_t` | -32,768 to 32,767 | `DUCKDB_TYPE_SMALLINT` |
+| Signed 32-bit | `INTEGER` or `INT` | `int32_t` | -2,147,483,648 to 2,147,483,647 | `DUCKDB_TYPE_INTEGER` |
+| Signed 64-bit | `BIGINT` | `int64_t` | -2^63 to 2^63-1 | `DUCKDB_TYPE_BIGINT` |
+| Unsigned 8-bit | `UTINYINT` | `uint8_t` | 0 to 255 | `DUCKDB_TYPE_UTINYINT` |
+| Unsigned 16-bit | `USMALLINT` | `uint16_t` | 0 to 65,535 | `DUCKDB_TYPE_USMALLINT` |
+| Unsigned 32-bit | `UINTEGER` | `uint32_t` | 0 to 4,294,967,295 | `DUCKDB_TYPE_UINTEGER` |
+| Unsigned 64-bit | `UBIGINT` | `uint64_t` | 0 to 2^64-1 | `DUCKDB_TYPE_UBIGINT` |
+
+```sql
+-- Integer type examples
+CREATE TABLE example (
+    tiny TINYINT,
+    small SMALLINT,
+    regular INTEGER,
+    big BIGINT,
+    unsigned_big UBIGINT
+);
+
+INSERT INTO example VALUES (127, 32767, 2147483647, 9223372036854775807, 18446744073709551615);
+```
+
+### Large Integer Types
+
+For integers beyond 64 bits:
+
+| Type | SQL Name | C Type | Description | Enum Value |
+|------|----------|--------|-------------|------------|
+| 128-bit signed | `HUGEINT` | `duckdb_hugeint` | Range: -2^127 to 2^127-1 | `DUCKDB_TYPE_HUGEINT` |
+| 128-bit unsigned | `UHUGEINT` | `duckdb_uhugeint` | Range: 0 to 2^128-1 | `DUCKDB_TYPE_UHUGEINT` |
+
+From `src/include/duckdb.h:386-400`:
+
+```cpp
+// HUGEINT is composed of a lower and upper component.
+// Its value is upper * 2^64 + lower.
+typedef struct {
+    uint64_t lower;
+    int64_t upper;
+} duckdb_hugeint;
+
+// UHUGEINT is composed of a lower and upper component.
+// Its value is upper * 2^64 + lower.
+typedef struct {
+    uint64_t lower;
+    uint64_t upper;
+} duckdb_uhugeint;
+```
+
+```sql
+-- HUGEINT example
+SELECT 170141183460469231731687303715884105727::HUGEINT;
+```
+
+### Floating-Point Types
+
+| Type | SQL Name | C Type | Precision | Enum Value |
+|------|----------|--------|-----------|------------|
+| Single precision | `FLOAT` or `REAL` | `float` | ~7 decimal digits | `DUCKDB_TYPE_FLOAT` |
+| Double precision | `DOUBLE` | `double` | ~15 decimal digits | `DUCKDB_TYPE_DOUBLE` |
+
+```sql
+CREATE TABLE measurements (
+    temperature FLOAT,
+    precise_value DOUBLE
+);
+```
+
+### Decimal Types
+
+Fixed-precision decimal numbers for exact arithmetic:
+
+```sql
+DECIMAL(precision, scale)
+```
+
+- **precision**: Total number of digits (1-38)
+- **scale**: Number of digits after decimal point
+
+From `src/include/duckdb.h:402-408`:
+
+```cpp
+// DECIMAL is composed of a width and a scale.
+// Their value is stored in a HUGEINT.
+typedef struct {
+    uint8_t width;
+    uint8_t scale;
+    duckdb_hugeint value;
+} duckdb_decimal;
+```
+
+```sql
+-- Decimal examples
+CREATE TABLE finances (
+    price DECIMAL(10, 2),      -- Up to 99,999,999.99
+    exchange_rate DECIMAL(18, 8) -- High precision rates
+);
+
+INSERT INTO finances VALUES (1234.56, 1.23456789);
+```
+
+<Note>
+DECIMAL types provide exact precision, unlike FLOAT/DOUBLE which may have rounding errors.
+</Note>
+
+## String Types
+
+### VARCHAR
+
+Variable-length character strings. In DuckDB, VARCHAR has no length limit.
+
+From `src/include/duckdb.h:417-433`, DuckDB uses an optimized string representation:
+
+```cpp
+// The internal representation of a VARCHAR (string_t).
+// If the VARCHAR does not exceed 12 characters, it's inlined.
+// Otherwise, a 4-byte prefix is inlined for faster comparisons.
+typedef struct {
+    union {
+        struct {
+            uint32_t length;
+            char prefix[4];
+            char *ptr;
+        } pointer;
+        struct {
+            uint32_t length;
+            char inlined[12];
+        } inlined;
+    } value;
+} duckdb_string_t;
+```
+
+```sql
+CREATE TABLE users (
+    username VARCHAR,
+    email VARCHAR,
+    bio VARCHAR
+);
+```
+
+### BLOB
+
+Binary Large OBject - stores arbitrary binary data.
+
+```sql
+CREATE TABLE files (
+    filename VARCHAR,
+    content BLOB
+);
+
+INSERT INTO files VALUES ('image.png', '\x89504E47...'::BLOB);
+```
+
+## Boolean Type
+
+| Type | SQL Name | C Type | Values | Enum Value |
+|------|----------|--------|--------|------------|
+| Boolean | `BOOLEAN` or `BOOL` | `bool` | TRUE, FALSE | `DUCKDB_TYPE_BOOLEAN` |
+
+```sql
+CREATE TABLE settings (
+    feature_enabled BOOLEAN,
+    is_admin BOOL
+);
+
+INSERT INTO settings VALUES (TRUE, FALSE);
+```
+
+## Temporal Types
+
+### Date
+
+Stores calendar dates without time.
+
+From `src/include/duckdb.h:312-322`:
+
+```cpp
+// DATE is stored as days since 1970-01-01.
+typedef struct {
+    int32_t days;
+} duckdb_date;
+
+typedef struct {
+    int32_t year;
+    int8_t month;
+    int8_t day;
+} duckdb_date_struct;
+```
+
+```sql
+CREATE TABLE events (
+    event_date DATE
+);
+
+INSERT INTO events VALUES ('2026-03-03'::DATE);
+SELECT event_date, EXTRACT(year FROM event_date) AS year FROM events;
+```
+
+### Time
+
+Stores time of day without date.
+
+| Type | Storage | Precision | Enum Value |
+|------|---------|-----------|------------|
+| `TIME` | Microseconds since 00:00:00 | Microsecond | `DUCKDB_TYPE_TIME` |
+| `TIME_NS` | Nanoseconds since 00:00:00 | Nanosecond | `DUCKDB_TYPE_TIME_NS` |
+| `TIME WITH TIME ZONE` | Time + offset | Microsecond | `DUCKDB_TYPE_TIME_TZ` |
+
+```sql
+CREATE TABLE schedule (
+    start_time TIME,
+    precise_time TIME_NS,
+    meeting_time TIME WITH TIME ZONE
+);
+```
+
+### Timestamp
+
+Stores both date and time.
+
+| Type | Storage | Range | Enum Value |
+|------|---------|-------|------------|
+| `TIMESTAMP` | Microseconds since 1970-01-01 | 290,000 BC to 290,000 AD | `DUCKDB_TYPE_TIMESTAMP` |
+| `TIMESTAMP_S` | Seconds since 1970-01-01 | Same | `DUCKDB_TYPE_TIMESTAMP_S` |
+| `TIMESTAMP_MS` | Milliseconds since 1970-01-01 | Same | `DUCKDB_TYPE_TIMESTAMP_MS` |
+| `TIMESTAMP_NS` | Nanoseconds since 1970-01-01 | 1677-09-21 to 2262-04-11 | `DUCKDB_TYPE_TIMESTAMP_NS` |
+| `TIMESTAMP WITH TIME ZONE` | Microseconds + instant | Same as TIMESTAMP | `DUCKDB_TYPE_TIMESTAMP_TZ` |
+
+```sql
+CREATE TABLE logs (
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+INSERT INTO logs VALUES 
+    ('2026-03-03 14:30:00'::TIMESTAMP, 
+     '2026-03-03 14:30:00+00'::TIMESTAMPTZ);
+```
+
+### Interval
+
+Represents a duration of time.
+
+From `src/include/duckdb.h:379-384`:
+
+```cpp
+// INTERVAL is stored in months, days, and micros.
+typedef struct {
+    int32_t months;
+    int32_t days;
+    int64_t micros;
+} duckdb_interval;
+```
+
+```sql
+SELECT 
+    INTERVAL '1 year 2 months',
+    INTERVAL '3 days',
+    INTERVAL '4 hours 30 minutes',
+    DATE '2026-01-01' + INTERVAL '1 month' AS next_month;
+```
+
+## Complex Types
+
+### LIST
+
+Variable-length ordered sequences of values of the same type.
+
+```sql
+CREATE TABLE products (
+    name VARCHAR,
+    tags LIST(VARCHAR),
+    prices LIST(DECIMAL(10,2))
+);
+
+INSERT INTO products VALUES 
+    ('Laptop', ['electronics', 'computers'], [999.99, 1299.99, 899.99]);
+
+SELECT name, tags[1] AS first_tag, len(prices) AS num_prices 
+FROM products;
+```
+
+From `src/include/duckdb.h:435-442`, lists are stored efficiently:
+
+```cpp
+// DuckDB's LISTs are composed of a 'parent' vector holding metadata,
+// and a child vector holding the entries.
+typedef struct {
+    uint64_t offset;  // Offset in child vector
+    uint64_t length;  // Number of elements
+} duckdb_list_entry;
+```
+
+### STRUCT
+
+Named fields with potentially different types (like a row).
+
+```sql
+CREATE TABLE employees (
+    id INTEGER,
+    name VARCHAR,
+    address STRUCT(street VARCHAR, city VARCHAR, zip VARCHAR)
+);
+
+INSERT INTO employees VALUES 
+    (1, 'Alice', {'street': '123 Main St', 'city': 'Boston', 'zip': '02101'});
+
+SELECT name, address.city FROM employees;
+```
+
+### MAP
+
+Key-value pairs (implemented as a list of structs).
+
+```sql
+CREATE TABLE settings (
+    user_id INTEGER,
+    preferences MAP(VARCHAR, VARCHAR)
+);
+
+INSERT INTO settings VALUES 
+    (1, MAP {'theme': 'dark', 'language': 'en', 'notifications': 'on'});
+
+SELECT preferences['theme'] AS theme FROM settings;
+```
+
+### ARRAY
+
+Fixed-length sequences (similar to LIST but with a fixed size).
+
+```sql
+CREATE TABLE game_scores (
+    player VARCHAR,
+    last_10_scores INTEGER[10]
+);
+
+INSERT INTO game_scores VALUES 
+    ('player1', [100, 95, 110, 105, 98, 102, 115, 108, 99, 103]);
+```
+
+## Special Types
+
+### UUID
+
+Universally Unique Identifier (128-bit value).
+
+```sql
+CREATE TABLE entities (
+    id UUID PRIMARY KEY,
+    name VARCHAR
+);
+
+INSERT INTO entities VALUES 
+    ('550e8400-e29b-41d4-a716-446655440000'::UUID, 'Example');
+
+SELECT uuid() AS new_uuid;  -- Generate a new UUID
+```
+
+### ENUM
+
+User-defined enumeration type with a fixed set of values.
+
+```sql
+CREATE TYPE status AS ENUM ('pending', 'approved', 'rejected');
+
+CREATE TABLE requests (
+    id INTEGER,
+    current_status status
+);
+
+INSERT INTO requests VALUES (1, 'pending');
+```
+
+### UNION
+
+A value that can be one of several types.
+
+```sql
+CREATE TABLE mixed_data (
+    id INTEGER,
+    value UNION(num INTEGER, str VARCHAR, flag BOOLEAN)
+);
+
+INSERT INTO mixed_data VALUES 
+    (1, 42),
+    (2, 'hello'),
+    (3, TRUE);
+```
+
+### BIT
+
+Bit strings for compact storage of binary flags.
+
+```sql
+CREATE TABLE flags (
+    permissions BIT
+);
+
+INSERT INTO flags VALUES ('101010'::BIT);
+```
+
+## Type Casting
+
+DuckDB supports explicit and implicit type casting:
+
+```sql
+-- Explicit casting
+SELECT CAST('123' AS INTEGER);
+SELECT '123'::INTEGER;  -- PostgreSQL-style cast
+
+-- Implicit casting (when safe)
+SELECT 1 + 2.5;  -- INTEGER + DOUBLE = DOUBLE
+
+-- TRY_CAST returns NULL on failure instead of error
+SELECT TRY_CAST('abc' AS INTEGER);  -- Returns NULL
+```
+
+The C API defines cast modes in `src/include/duckdb.h:242`:
+
+```cpp
+typedef enum duckdb_cast_mode { 
+    DUCKDB_CAST_NORMAL = 0,  // Throws error on failure
+    DUCKDB_CAST_TRY = 1      // Returns NULL on failure
+} duckdb_cast_mode;
+```
+
+## NULL Values
+
+All DuckDB types support NULL values to represent missing or unknown data:
+
+```sql
+CREATE TABLE nullable_example (
+    required_field INTEGER NOT NULL,
+    optional_field VARCHAR
+);
+
+INSERT INTO nullable_example VALUES (1, NULL);
+
+SELECT 
+    optional_field IS NULL AS is_null,
+    COALESCE(optional_field, 'default') AS with_default
+FROM nullable_example;
+```
+
+## Type Summary Table
+
+| Category | Types | Enum Values |
+|----------|-------|-------------|
+| **Integers** | TINYINT, SMALLINT, INTEGER, BIGINT, HUGEINT | `DUCKDB_TYPE_TINYINT` through `DUCKDB_TYPE_HUGEINT` |
+| **Unsigned** | UTINYINT, USMALLINT, UINTEGER, UBIGINT, UHUGEINT | `DUCKDB_TYPE_UTINYINT` through `DUCKDB_TYPE_UHUGEINT` |
+| **Floating** | FLOAT, DOUBLE | `DUCKDB_TYPE_FLOAT`, `DUCKDB_TYPE_DOUBLE` |
+| **Decimal** | DECIMAL | `DUCKDB_TYPE_DECIMAL` |
+| **String** | VARCHAR, BLOB | `DUCKDB_TYPE_VARCHAR`, `DUCKDB_TYPE_BLOB` |
+| **Boolean** | BOOLEAN | `DUCKDB_TYPE_BOOLEAN` |
+| **Temporal** | DATE, TIME, TIMESTAMP, INTERVAL | `DUCKDB_TYPE_DATE`, `DUCKDB_TYPE_TIME`, `DUCKDB_TYPE_TIMESTAMP`, `DUCKDB_TYPE_INTERVAL` |
+| **Complex** | LIST, STRUCT, MAP, ARRAY, UNION | `DUCKDB_TYPE_LIST`, `DUCKDB_TYPE_STRUCT`, `DUCKDB_TYPE_MAP`, `DUCKDB_TYPE_ARRAY`, `DUCKDB_TYPE_UNION` |
+| **Special** | UUID, ENUM, BIT | `DUCKDB_TYPE_UUID`, `DUCKDB_TYPE_ENUM`, `DUCKDB_TYPE_BIT` |
+
+<Card title="Next Steps" icon="arrow-right">
+  - Explore [Storage System](/concepts/storage) to see how these types are stored
+  - Learn about [Query Execution](/concepts/query-execution) and vectorized processing
+  - Read the [Architecture Overview](/concepts/architecture)
+</Card>

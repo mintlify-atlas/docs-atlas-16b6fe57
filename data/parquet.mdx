@@ -1,0 +1,317 @@
+---
+title: Parquet Files
+description: Efficiently read and write Parquet files with DuckDB's native columnar format support
+---
+
+DuckDB provides high-performance native support for Apache Parquet, a columnar storage format optimized for analytical queries. Parquet files can be queried directly without importing data first.
+
+## Reading Parquet Files
+
+Query Parquet files directly by referencing them in SQL:
+
+```sql
+SELECT * FROM 'data.parquet';
+```
+
+DuckDB automatically reads the Parquet schema and allows you to query the data immediately.
+
+## Using read_parquet
+
+For more control, use the `read_parquet` function:
+
+<CodeGroup>
+```sql Single File
+SELECT * FROM read_parquet('sales.parquet');
+```
+
+```sql Multiple Files
+SELECT * FROM read_parquet(['file1.parquet', 'file2.parquet']);
+```
+
+```sql Glob Pattern
+SELECT * FROM read_parquet('data/*.parquet');
+```
+
+```sql With Filter
+SELECT id, amount 
+FROM read_parquet('sales.parquet')
+WHERE date >= '2024-01-01';
+```
+</CodeGroup>
+
+## Why Parquet?
+
+Parquet offers significant advantages for analytical workloads:
+
+### Columnar Storage
+
+Data is stored column-by-column rather than row-by-row, enabling:
+- **Better compression** - Similar values compress more efficiently
+- **Faster queries** - Read only columns needed for your query
+- **Efficient aggregations** - Skip irrelevant data automatically
+
+### Query Performance
+
+```sql
+-- Only reads the 'id' column from disk
+SELECT id FROM 'large_dataset.parquet' LIMIT 10;
+```
+
+### Built-in Statistics
+
+Parquet files contain min/max statistics that enable:
+- Row group skipping
+- Efficient filtering without reading data
+- Optimized query planning
+
+```sql
+-- DuckDB uses Parquet statistics to skip row groups
+SELECT * FROM 'data.parquet' WHERE id > 5000;
+```
+
+## Writing Parquet Files
+
+Export data to Parquet using the `COPY` statement:
+
+<CodeGroup>
+```sql Export Table
+COPY integers TO 'integers.parquet';
+```
+
+```sql Export Query
+COPY (
+  SELECT * FROM orders WHERE status = 'completed'
+) TO 'completed_orders.parquet';
+```
+
+```sql With Compression
+COPY sales TO 'sales.parquet' (
+  FORMAT PARQUET,
+  CODEC 'SNAPPY'
+);
+```
+</CodeGroup>
+
+## Parquet Options
+
+### Compression Codecs
+
+Choose from multiple compression algorithms:
+
+<CodeGroup>
+```sql SNAPPY (Default)
+COPY data TO 'data.parquet' (CODEC 'SNAPPY');
+```
+
+```sql GZIP
+COPY data TO 'data.parquet' (CODEC 'GZIP');
+```
+
+```sql ZSTD
+COPY data TO 'data.parquet' (CODEC 'ZSTD');
+```
+
+```sql Uncompressed
+COPY data TO 'data.parquet' (CODEC 'UNCOMPRESSED');
+```
+</CodeGroup>
+
+### Row Group Size
+
+Control the size of row groups for optimal performance:
+
+```sql
+COPY large_table TO 'output.parquet' (
+  ROW_GROUP_SIZE 100000
+);
+```
+
+Smaller row groups enable:
+- Better parallelism
+- More granular filtering
+- Higher memory overhead
+
+### Compression Level
+
+```sql
+COPY data TO 'data.parquet' (
+  CODEC 'ZSTD',
+  COMPRESSION_LEVEL 9
+);
+```
+
+### Parquet Version
+
+```sql
+COPY data TO 'data.parquet' (
+  PARQUET_VERSION 'V1'
+);
+```
+
+## Partitioned Writes
+
+Write data partitioned by column values:
+
+```sql
+COPY (
+  SELECT i % 2 AS group, i 
+  FROM range(1000) t(i)
+) TO 'partitioned.parquet' (
+  PARTITION_BY (group)
+);
+```
+
+This creates separate files for each partition:
+```
+partitioned.parquet/
+  group=0/
+    data_0.parquet
+  group=1/
+    data_0.parquet
+```
+
+## Hive Partitioning
+
+Read Hive-partitioned Parquet files:
+
+```sql
+SELECT id, value, part, date 
+FROM read_parquet(
+  'data/part=*/date=*/*.parquet',
+  hive_partitioning = 1
+)
+WHERE part = 'a';
+```
+
+DuckDB extracts partition values from directory names and uses them for efficient filtering.
+
+## Metadata and Schema
+
+Inspect Parquet file metadata:
+
+```sql
+-- View schema information
+SELECT * FROM parquet_schema('data.parquet');
+
+-- View file metadata
+SELECT * FROM parquet_metadata('data.parquet');
+
+-- View detailed statistics
+SELECT * FROM parquet_file_metadata('data.parquet');
+```
+
+## Key-Value Metadata
+
+Add custom metadata to Parquet files:
+
+```sql
+COPY (SELECT 1 AS id, 'foo' AS name) 
+TO 'metadata_example.parquet' (
+  FORMAT PARQUET,
+  KV_METADATA {foo: 'bar', version: 42}
+);
+```
+
+Read metadata back:
+
+```sql
+SELECT * FROM parquet_kv_metadata('metadata_example.parquet');
+```
+
+## Multiple Files and Union
+
+Combine multiple Parquet files with different schemas:
+
+```sql
+SELECT * FROM read_parquet(
+  ['schema1.parquet', 'schema2.parquet'],
+  union_by_name = true
+);
+```
+
+This merges columns by name, filling missing columns with NULL.
+
+## Encryption
+
+Read encrypted Parquet files:
+
+```sql
+SELECT * FROM read_parquet('encrypted.parquet',
+  encryption_config = {
+    footer_key: 'k1',
+    column_keys: {key_name: 'k2'}
+  }
+);
+```
+
+## Export and Import Database
+
+Backup entire databases in Parquet format:
+
+<CodeGroup>
+```sql Export
+EXPORT DATABASE 'backup' (FORMAT PARQUET);
+```
+
+```sql Export with Compression
+EXPORT DATABASE 'backup' (
+  FORMAT PARQUET,
+  CODEC 'SNAPPY'
+);
+```
+
+```sql Import
+IMPORT DATABASE 'backup';
+```
+</CodeGroup>
+
+The export preserves:
+- Table schemas
+- Data types
+- Constraints (NOT NULL, etc.)
+
+## Performance Tips
+
+- **Column Pruning**: Select only needed columns to minimize I/O
+  ```sql
+  SELECT id, name FROM 'large.parquet'; -- Only reads id and name columns
+  ```
+
+- **Filter Pushdown**: Apply filters early to skip row groups
+  ```sql
+  SELECT * FROM 'data.parquet' WHERE date = '2024-01-01';
+  ```
+
+- **Parallel Reading**: DuckDB automatically parallelizes Parquet reading across row groups
+
+- **Statistics**: Parquet min/max statistics enable automatic row group skipping
+
+- **Compression**: Use SNAPPY for good balance of speed and compression, ZSTD for better compression ratio
+
+## Common Patterns
+
+### Convert CSV to Parquet
+
+```sql
+COPY (SELECT * FROM 'data.csv') 
+TO 'data.parquet' (FORMAT PARQUET);
+```
+
+### Query Nested Structures
+
+```sql
+-- Parquet supports complex types
+SELECT 
+  user.id,
+  user.profile.name,
+  user.tags[1]
+FROM 'nested.parquet';
+```
+
+### Filter with Virtual Columns
+
+```sql
+SELECT *, filename, file_row_number
+FROM read_parquet('data/*.parquet')
+WHERE file_row_number < 1000;
+```

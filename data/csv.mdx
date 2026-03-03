@@ -1,0 +1,250 @@
+---
+title: CSV Files
+description: Read and write CSV files with DuckDB's native CSV support and automatic type detection
+---
+
+DuckDB provides first-class support for CSV (Comma-Separated Values) files with automatic dialect detection, type inference, and flexible configuration options.
+
+## Reading CSV Files
+
+The simplest way to read a CSV file is to reference it directly in a query:
+
+```sql
+SELECT * FROM 'data.csv';
+```
+
+DuckDB automatically:
+- Detects the delimiter (comma, tab, pipe, etc.)
+- Identifies header rows
+- Infers column types
+- Handles quoted values and escape characters
+
+## Using read_csv_auto
+
+For more control, use the `read_csv_auto` function:
+
+<CodeGroup>
+```sql Basic Usage
+SELECT * FROM read_csv_auto('sales.csv');
+```
+
+```sql With Options
+SELECT * FROM read_csv_auto('data.csv',
+  delim = '|',
+  header = true,
+  nullstr = 'NA'
+);
+```
+
+```sql Custom Types
+SELECT * FROM read_csv_auto('data.csv',
+  dtypes = {'Quarter': 'TINYINT', 'Year': 'INTEGER'}
+);
+```
+</CodeGroup>
+
+## CSV Options
+
+### Delimiter Options
+
+```sql
+-- Pipe-delimited file
+SELECT * FROM read_csv_auto('data.csv', delim = '|');
+
+-- Tab-delimited file
+SELECT * FROM read_csv_auto('data.tsv', delim = '\t');
+```
+
+### Header Options
+
+<CodeGroup>
+```sql With Header
+SELECT * FROM read_csv_auto('data.csv', header = true);
+```
+
+```sql Without Header
+SELECT * FROM read_csv_auto('data.csv', header = false);
+```
+
+```sql Custom Column Names
+SELECT * FROM read_csv_auto('data.csv',
+  header = false,
+  columns = {'id': 'INTEGER', 'name': 'VARCHAR', 'value': 'DOUBLE'}
+);
+```
+</CodeGroup>
+
+### Null Handling
+
+```sql
+-- Treat 'NA', 'NULL', and empty strings as NULL
+SELECT * FROM read_csv_auto('data.csv',
+  nullstr = ['NA', 'NULL', '']
+);
+```
+
+### Quote and Escape Characters
+
+```sql
+SELECT * FROM read_csv_auto('data.csv',
+  quote = '"',
+  escape = '\\'
+);
+```
+
+## Writing CSV Files
+
+Use the `COPY` statement to write data to CSV files:
+
+<CodeGroup>
+```sql Export Table
+COPY customers TO 'customers.csv';
+```
+
+```sql Export Query
+COPY (SELECT * FROM orders WHERE date > '2024-01-01') 
+TO 'recent_orders.csv';
+```
+
+```sql With Options
+COPY products TO 'products.csv' (
+  DELIMITER ',',
+  HEADER true,
+  QUOTE '"'
+);
+```
+</CodeGroup>
+
+## Loading into Tables
+
+Import CSV data into existing tables:
+
+```sql
+CREATE TABLE test (a INTEGER, b INTEGER, c VARCHAR(10));
+
+COPY test FROM 'test.csv';
+```
+
+## Partial Column Import/Export
+
+Work with specific columns only:
+
+<CodeGroup>
+```sql Export Columns
+COPY test (a, c) TO 'partial.csv' (
+  DELIMITER ',',
+  HEADER false
+);
+```
+
+```sql Import Columns
+CREATE TABLE test4 (a INTEGER, b INTEGER, c VARCHAR(10));
+
+COPY test4 (a, c) FROM 'partial.csv' (DELIM ',');
+-- Column b will be NULL for all rows
+```
+</CodeGroup>
+
+## Multiple Files
+
+Read multiple CSV files at once:
+
+<CodeGroup>
+```sql Glob Pattern
+SELECT * FROM 'data/sales_*.csv';
+```
+
+```sql Explicit List
+SELECT * FROM read_csv_auto(
+  ['january.csv', 'february.csv', 'march.csv']
+);
+```
+
+```sql With Filename
+SELECT *, filename 
+FROM read_csv_auto('data/*.csv', filename = true);
+```
+</CodeGroup>
+
+## Hive Partitioning
+
+DuckDB supports Hive-style partitioning for efficient file filtering:
+
+```sql
+-- Read from partitioned directory structure
+SELECT id, value, part, date 
+FROM read_csv_auto(
+  'data/part=*/date=*/data.csv',
+  HIVE_PARTITIONING = 1
+)
+WHERE part = 'a' AND date > '2024-01-01';
+```
+
+With Hive partitioning, DuckDB:
+- Extracts partition values from directory names
+- Adds them as columns to the result
+- Skips reading files that don't match filter conditions
+
+## Type Detection
+
+Override automatic type detection:
+
+<CodeGroup>
+```sql Struct Syntax
+SELECT * FROM read_csv_auto('data.csv',
+  dtypes = {'Year': 'INTEGER', 'Quarter': 'TINYINT'}
+);
+```
+
+```sql List Syntax
+SELECT * FROM read_csv_auto('data.csv',
+  dtypes = ['INTEGER', 'TINYINT', 'VARCHAR']
+);
+```
+</CodeGroup>
+
+## Common Patterns
+
+### Skip Rows
+
+```sql
+SELECT * FROM read_csv_auto('data.csv', skip = 5);
+```
+
+### Limit Rows During Import
+
+```sql
+COPY (SELECT * FROM read_csv_auto('large.csv') LIMIT 1000)
+TO 'sample.csv';
+```
+
+### Handle Different Line Endings
+
+DuckDB automatically handles Windows (CRLF), Unix (LF), and Mac (CR) line endings:
+
+```sql
+-- Works with any line ending format
+SELECT * FROM 'mixed_line_endings.csv';
+```
+
+## Error Handling
+
+Control how DuckDB handles malformed rows:
+
+```sql
+-- Reject malformed rows and save to error table
+SELECT * FROM read_csv_auto('data.csv',
+  rejects_table = 'csv_errors',
+  rejects_limit = 100
+);
+
+-- View rejected rows
+SELECT * FROM csv_errors;
+```
+
+## Performance Tips
+
+- DuckDB automatically parallelizes CSV reading across multiple threads
+- Use `COPY` instead of `INSERT INTO ... SELECT` for bulk loading
+- For very large files, consider converting to Parquet format for faster subsequent queries
+- Use column projection to read only needed columns: `SELECT col1, col2 FROM 'file.csv'`

@@ -1,0 +1,160 @@
+---
+title: C++ API Overview
+description: Overview of DuckDB's C++ API for embedded analytics
+---
+
+## Introduction
+
+DuckDB's C++ API provides a simple and efficient interface for embedding an analytical database directly into C++ applications. The API is designed around three main classes:
+
+- `DuckDB` - The database instance
+- `Connection` - A connection to the database for executing queries
+- `QueryResult` - Results from executed queries
+
+The C++ API is header-only and requires only including `duckdb.hpp`.
+
+## Basic Usage
+
+Here's a minimal example demonstrating the core workflow:
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    // Create an in-memory database
+    DuckDB db(nullptr);
+    
+    // Create a connection
+    Connection con(db);
+    
+    // Execute queries
+    con.Query("CREATE TABLE integers(i INTEGER)");
+    con.Query("INSERT INTO integers VALUES (3)");
+    
+    // Query and print results
+    auto result = con.Query("SELECT * FROM integers");
+    result->Print();
+}
+```
+
+## Database Initialization
+
+You can create a DuckDB instance in several ways:
+
+<CodeGroup>
+```cpp In-Memory
+// In-memory database
+DuckDB db(nullptr);
+```
+
+```cpp Persistent
+// Persistent database
+DuckDB db("path/to/database.db");
+```
+
+```cpp With Config
+// With custom configuration
+DBConfig config;
+config.options.access_mode = AccessMode::READ_ONLY;
+DuckDB db("path/to/database.db", &config);
+```
+</CodeGroup>
+
+## Query Execution
+
+The `Connection` class provides multiple methods for executing queries:
+
+- **`Query()`** - Executes a query and returns a materialized result
+- **`SendQuery()`** - Executes a query and returns a streaming result
+- **`Prepare()`** - Prepares a statement for repeated execution
+
+### Materialized vs Streaming Results
+
+```cpp
+// Materialized - entire result set is loaded into memory
+auto result = con.Query("SELECT * FROM large_table");
+
+// Streaming - results are fetched incrementally
+auto stream_result = con.SendQuery("SELECT * FROM large_table");
+```
+
+## Result Handling
+
+Query results can be accessed in multiple ways:
+
+```cpp
+auto result = con.Query("SELECT name, age FROM users");
+
+// Print to console
+result->Print();
+
+// Iterate over chunks
+while (auto chunk = result->Fetch()) {
+    for (idx_t row = 0; row < chunk->size(); row++) {
+        auto name = chunk->GetValue(0, row);
+        auto age = chunk->GetValue(1, row);
+        // Process values...
+    }
+}
+
+// For MaterializedQueryResult, access individual values
+if (result->type == QueryResultType::MATERIALIZED_RESULT) {
+    auto &materialized = result->Cast<MaterializedQueryResult>();
+    auto value = materialized.GetValue(0, 0); // column 0, row 0
+}
+```
+
+## Error Handling
+
+All query operations check for errors:
+
+```cpp
+auto result = con.Query("SELECT * FROM non_existent_table");
+
+if (result->HasError()) {
+    std::cerr << "Error: " << result->GetError() << std::endl;
+    return 1;
+}
+```
+
+## API Reference
+
+<CardGroup cols={3}>
+  <Card title="Database" icon="database" href="./database">
+    DuckDB database instance and configuration
+  </Card>
+  <Card title="Connection" icon="link" href="./connection">
+    Connection management and query execution
+  </Card>
+  <Card title="Query Results" icon="table" href="./query-result">
+    Working with query results and data access
+  </Card>
+</CardGroup>
+
+## Example Code
+
+For a complete working example, see the [embedded C++ example](https://github.com/duckdb/duckdb/blob/main/examples/embedded-c%2B%2B/main.cpp) in the DuckDB repository:
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    DuckDB db(nullptr);
+    Connection con(db);
+    
+    con.Query("CREATE TABLE integers(i INTEGER)");
+    con.Query("INSERT INTO integers VALUES (3)");
+    auto result = con.Query("SELECT * FROM integers");
+    result->Print();
+}
+```
+
+## Next Steps
+
+- Learn about [Database configuration and management](./database)
+- Explore [Connection methods and query execution](./connection)
+- Understand [Query result types and data access](./query-result)

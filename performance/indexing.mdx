@@ -1,0 +1,368 @@
+---
+title: Indexing Strategies  
+description: Understanding DuckDB's indexing mechanisms including ART indexes and zone maps
+---
+
+DuckDB provides two main mechanisms for accelerating data access: ART (Adaptive Radix Tree) indexes for point and range lookups, and zone maps for pruning data during scans.
+
+## ART Indexes
+
+### Overview
+
+DuckDB uses **ART (Adaptive Radix Tree)** indexes, an efficient in-memory index structure that adapts to data distribution. ART indexes are implemented in `src/execution/index/art/`.
+
+From `src/include/duckdb/execution/index/art/art.hpp:43`:
+
+```cpp
+class ART : public BoundIndex {
+public:
+    //! Index type name for the ART.
+    static constexpr const char *TYPE_NAME = "ART";
+    //! FixedSizeAllocator count of the ART.
+    static constexpr uint8_t ALLOCATOR_COUNT = 9;
+```
+
+ART indexes support:
+- Point lookups (`=`)
+- Range scans (`<`, `>`, `BETWEEN`)
+- Prefix matching for strings
+- NULL handling
+- Multiple column indexes
+
+### Creating ART Indexes
+
+Create a unique index:
+
+```sql
+CREATE UNIQUE INDEX idx_customer_id 
+ON customers(customer_id);
+```
+
+Create a non-unique index:
+
+```sql
+CREATE INDEX idx_order_date 
+ON orders(order_date);
+```
+
+Multi-column indexes:
+
+```sql
+CREATE INDEX idx_customer_date 
+ON orders(customer_id, order_date);
+```
+
+### Supported Data Types
+
+From `src/execution/index/art/art.cpp:56`, ART indexes support:
+
+- `BOOL`
+- `INT8`, `INT16`, `INT32`, `INT64`, `INT128`
+- `UINT8`, `UINT16`, `UINT32`, `UINT64`, `UINT128`
+- `FLOAT`, `DOUBLE`
+- `VARCHAR`
+
+Nested types (arrays, structs) are not currently supported.
+
+### When to Use ART Indexes
+
+ART indexes are beneficial for:
+
+#### 1. Primary Key Constraints
+
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,  -- Automatically creates ART index
+    email VARCHAR UNIQUE,     -- Also creates ART index
+    name VARCHAR
+);
+```
+
+#### 2. Foreign Key Lookups
+
+```sql
+CREATE INDEX idx_order_customer 
+ON orders(customer_id);
+
+SELECT * FROM orders 
+WHERE customer_id = 12345;  -- Uses index
+```
+
+#### 3. Range Queries
+
+```sql
+CREATE INDEX idx_timestamp 
+ON events(timestamp);
+
+SELECT * FROM events 
+WHERE timestamp BETWEEN '2024-01-01' AND '2024-01-31';  -- Uses index
+```
+
+#### 4. Sorting
+
+Indexes can accelerate ORDER BY:
+
+```sql
+SELECT * FROM products 
+ORDER BY price 
+LIMIT 10;  -- May use index on price
+```
+
+### When NOT to Use ART Indexes
+
+Avoid indexes when:
+
+1. **High cardinality relative to table size** - Scanning may be faster
+2. **Frequent bulk updates** - Index maintenance overhead
+3. **Analytical queries scanning most rows** - Zone maps are better (see below)
+4. **Low selectivity filters** - Returning >10-15% of rows usually favors scans
+
+### Index Internals
+
+ART is a radix tree with adaptive node sizes:
+
+- **Node4** - Up to 4 children (smallest node)
+- **Node16** - Up to 16 children  
+- **Node48** - Up to 48 children
+- **Node256** - Up to 256 children (largest node)
+
+Nodes grow and shrink dynamically based on the number of children.
+
+From `src/execution/index/art/art.cpp:84`:
+
+```cpp
+array<unsafe_unique_ptr<FixedSizeAllocator>, ALLOCATOR_COUNT> allocator_array = {
+    make_unsafe_uniq<FixedSizeAllocator>(prefix_size, block_manager),
+    make_unsafe_uniq<FixedSizeAllocator>(sizeof(Leaf), block_manager),
+    make_unsafe_uniq<FixedSizeAllocator>(sizeof(Node4), block_manager),
+    make_unsafe_uniq<FixedSizeAllocator>(sizeof(Node16), block_manager),
+    make_unsafe_uniq<FixedSizeAllocator>(sizeof(Node48), block_manager),
+    make_unsafe_uniq<FixedSizeAllocator>(sizeof(Node256), block_manager),
+    // ...
+};
+```
+
+### Managing Indexes
+
+Drop an index:
+
+```sql
+DROP INDEX idx_customer_id;
+```
+
+List all indexes:
+
+```sql
+SELECT * FROM duckdb_indexes();
+```
+
+View index usage:
+
+```sql
+EXPLAIN SELECT * FROM customers WHERE customer_id = 100;
+```
+
+Look for "INDEX_SCAN" in the plan to confirm index usage.
+
+## Zone Maps
+
+### Overview
+
+**Zone maps** (also called min-max indexes) store minimum and maximum values for each column segment. DuckDB uses zone maps automatically for all columns in persistent storage.
+
+Zone maps enable **data skipping** - entire row groups can be skipped if their min/max ranges don't overlap with query predicates.
+
+### How Zone Maps Work
+
+DuckDB stores data in row groups (default ~122K rows). Each row group maintains statistics per column:
+
+- Minimum value
+- Maximum value  
+- NULL count
+- Distinct count (approximate)
+
+From `src/storage/table/row_group.cpp:515`:
+
+```cpp
+bool RowGroup::CheckZonemap(ScanFilterInfo &filters) {
+    auto &filter_list = filters.GetFilterList();
+    for (idx_t i = 0; i < filter_list.size(); i++) {
+        auto &entry = filter_list[i];
+        auto &filter = entry.filter;
+        const auto &base_column_index = entry.table_column_index;
+        
+        auto prune_result = GetColumn(base_column_index).CheckZonemap(base_column_index, filter);
+        if (prune_result == FilterPropagateResult::FILTER_ALWAYS_FALSE) {
+            return false;  // Skip this row group entirely
+        }
+    }
+    return true;
+}
+```
+
+### Zone Map Pruning Example
+
+Consider a table with timestamps:
+
+```sql
+CREATE TABLE events AS 
+SELECT 
+    range AS id,
+    '2024-01-01'::DATE + (range % 365) AS event_date,
+    'event_' || range AS description
+FROM range(100000000);
+```
+
+Query with zone map pruning:
+
+```sql
+SELECT COUNT(*) 
+FROM events 
+WHERE event_date = '2024-03-15';
+```
+
+DuckDB will:
+1. Check each row group's min/max `event_date`
+2. Skip row groups where `max < '2024-03-15'` or `min > '2024-03-15'`
+3. Only scan row groups where the range overlaps
+
+This can eliminate 99%+ of data from being scanned.
+
+### Zone Map Benefits
+
+**Automatic** - No manual index creation required
+
+**Zero overhead** - Statistics collected during data ingestion
+
+**Effective for**:
+- Range filters on sorted/clustered columns
+- Equality predicates  
+- MIN/MAX aggregates
+- IN clauses with small sets
+
+### Optimizing for Zone Maps
+
+#### 1. Sort Data by Filter Columns
+
+Sorting data maximizes zone map effectiveness:
+
+```sql
+-- Less effective - random order
+CREATE TABLE events_unsorted AS 
+SELECT * FROM events;
+
+-- More effective - sorted by common filter column  
+CREATE TABLE events_sorted AS
+SELECT * FROM events 
+ORDER BY event_date;
+```
+
+With sorted data, each row group has a narrow min/max range, enabling better pruning.
+
+#### 2. Use Appropriate Data Types
+
+Narrower types create tighter bounds:
+
+```sql
+-- Wider range
+CREATE TABLE t1 (amount DOUBLE);
+
+-- Tighter range for zone maps
+CREATE TABLE t2 (amount DECIMAL(10,2));
+```
+
+#### 3. Partition-Like Queries
+
+Structure data to match query patterns:
+
+```sql
+-- If queries filter by year, cluster by year
+CREATE TABLE sales AS
+SELECT * FROM raw_sales 
+ORDER BY YEAR(sale_date), sale_date;
+```
+
+### Zone Map Examples
+
+From `benchmark/micro/zonemaps/zonemaps.benchmark:9`:
+
+```sql
+-- Create table with various column characteristics
+CREATE TABLE t AS 
+SELECT 
+    range a,                    -- Sorted column
+    length(range::VARCHAR) b,   -- Low cardinality  
+    mod(range, 10000) c,        -- Cyclic values
+    5 d,                        -- Constant
+    10000 e                     -- Constant
+FROM range(100000000);
+
+-- Zone map effectively prunes on low-cardinality column
+SELECT count(*) FROM t WHERE b IN (1, 2, 4);
+```
+
+Columns `d` and `e` have perfect zone map pruning (all row groups have same min=max).
+
+Column `a` has excellent pruning for range queries since it's sorted.
+
+Column `c` has moderate pruning due to cycling values.
+
+### Viewing Zone Map Effectiveness
+
+Use `EXPLAIN ANALYZE` to see pruning:
+
+```sql
+EXPLAIN ANALYZE 
+SELECT * FROM large_table 
+WHERE event_date = '2024-03-15';
+```
+
+Look for:
+- Row groups scanned vs. total row groups
+- "Filters" section showing pushed-down predicates
+- Actual rows processed
+
+## Index vs Zone Map Decision Guide
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Primary key lookups | ART index |
+| Foreign key joins | ART index |
+| Point queries (=) on high-cardinality columns | ART index |
+| Range scans on sorted analytical data | Zone maps (no index needed) |
+| Analytical aggregations | Zone maps (no index needed) |
+| OLTP-style random access | ART index |
+| Full table scans with filters | Zone maps (no index needed) |
+| ORDER BY + LIMIT on small results | ART index |
+
+## Best Practices
+
+1. **Start without indexes** - DuckDB's zone maps often suffice for analytical queries
+
+2. **Profile before indexing** - Use `EXPLAIN ANALYZE` to identify slow queries
+
+3. **Index for constraints** - Always use indexes for PRIMARY KEY and UNIQUE constraints
+
+4. **Sort for analytics** - Cluster data by common filter columns for zone map effectiveness
+
+5. **Multi-column indexes** - Put most selective columns first:
+   ```sql
+   CREATE INDEX idx ON t(high_selectivity_col, low_selectivity_col);
+   ```
+
+6. **Monitor index size** - Check index memory usage:
+   ```sql
+   SELECT index_name, estimated_size 
+   FROM duckdb_indexes();
+   ```
+
+7. **Rebuild indexes after bulk loads** - Drop and recreate for better structure:
+   ```sql
+   DROP INDEX idx_name;
+   CREATE INDEX idx_name ON table(column);
+   ```
+
+## See Also
+
+- [Query Optimization](/performance/optimization) - Understanding the query optimizer
+- [Performance Benchmarks](/performance/benchmarks) - Measuring index performance

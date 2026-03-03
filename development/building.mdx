@@ -1,0 +1,334 @@
+---
+title: Building from Source
+description: Build DuckDB from source code using CMake and Make
+---
+
+DuckDB can be built from source using CMake and a C++11 compliant compiler. This guide covers the build process, options, and dependencies.
+
+## Prerequisites
+
+Before building DuckDB, ensure you have:
+
+- **CMake** (version 3.5 or higher)
+- **Python 3**
+- **C++11 compliant compiler**:
+  - GCC 8.0+ or Clang 9.0+ (Linux/macOS)
+  - MSVC (Windows)
+- **Git** (for version information)
+
+### Optional Tools
+
+- **[Ninja](https://ninja-build.org/)**: Faster parallel builds
+- **[ccache](https://ccache.dev/)**: Speed up rebuilds (automatically detected)
+
+## Quick Start
+
+<Steps>
+
+<Step title="Clone the repository">
+
+```bash
+git clone https://github.com/duckdb/duckdb.git
+cd duckdb
+```
+
+</Step>
+
+<Step title="Build the release version">
+
+```bash
+make
+```
+
+This creates an optimized release build in `build/release/`.
+
+</Step>
+
+<Step title="Build the debug version (for development)">
+
+```bash
+make debug
+```
+
+This creates a debug build with symbols in `build/debug/`.
+
+</Step>
+
+</Steps>
+
+## Build Targets
+
+### Release Build
+
+Optimized build for production use:
+
+```bash
+make release
+```
+
+Configuration:
+- Optimization: `-O3`
+- Defines: `-DNDEBUG`
+- Build type: `Release`
+
+### Debug Build
+
+Unoptimized build with debug symbols:
+
+```bash
+make debug
+```
+
+Configuration:
+- Optimization: `-O0`
+- Debug info: `-g`
+- Defines: `-DDEBUG`
+- Sanitizers: Address sanitizer and UBSan enabled by default
+
+### Release with Debug Info
+
+Optimized build with debug symbols:
+
+```bash
+make reldebug
+```
+
+### Release with Assertions
+
+Optimized build with assertions enabled:
+
+```bash
+make relassert
+```
+
+Useful for catching bugs in production-like builds.
+
+## Build Options
+
+### Using Ninja for Faster Builds
+
+Ninja provides significantly faster parallel builds:
+
+```bash
+GEN=ninja make
+```
+
+If builds lock up your system due to memory pressure, limit parallel processes:
+
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=4 GEN=ninja make
+```
+
+Without Ninja, you can still parallelize:
+
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) make
+```
+
+### Build with Extensions
+
+Build specific extensions:
+
+```bash
+BUILD_TPCH=1 BUILD_HTTPFS=1 make
+```
+
+Common extension flags:
+- `BUILD_TPCH=1` - TPC-H benchmark extension
+- `BUILD_TPCDS=1` - TPC-DS benchmark extension  
+- `BUILD_HTTPFS=1` - HTTP/S3 file system support
+- `BUILD_JSON=1` - JSON extension
+- `BUILD_PARQUET=1` - Parquet support (usually enabled by default)
+- `BUILD_ICU=1` - International Components for Unicode
+
+### Build with Benchmarks
+
+```bash
+BUILD_BENCHMARK=1 BUILD_TPCH=1 make
+```
+
+This enables the benchmark runner in `build/release/benchmark/benchmark_runner`.
+
+## CMake Configuration
+
+### Direct CMake Usage
+
+For more control, use CMake directly:
+
+<Steps>
+
+<Step title="Configure the build">
+
+```bash
+mkdir -p build/release
+cd build/release
+cmake -DCMAKE_BUILD_TYPE=Release ../..
+```
+
+</Step>
+
+<Step title="Build the project">
+
+```bash
+cmake --build . --config Release
+```
+
+</Step>
+
+</Steps>
+
+### CMake Options
+
+Common CMake configuration options:
+
+| Option | Description | Default |
+|--------|-------------|----------|
+| `CMAKE_BUILD_TYPE` | Build type: `Debug`, `Release`, `RelWithDebInfo` | `Release` |
+| `BUILD_UNITTESTS` | Build the unit test runner | `TRUE` |
+| `BUILD_SHELL` | Build the DuckDB CLI shell | `TRUE` |
+| `BUILD_BENCHMARKS` | Build benchmark suite | `FALSE` |
+| `DISABLE_UNITY` | Disable unity builds | `FALSE` |
+| `ENABLE_SANITIZER` | Enable address sanitizer (debug only) | `TRUE` |
+| `ENABLE_UBSAN` | Enable undefined behavior sanitizer | `TRUE` |
+| `FORCE_COLORED_OUTPUT` | Always produce colored output | `FALSE` |
+
+Example with options:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Debug \
+      -DBUILD_BENCHMARKS=1 \
+      -DFORCE_COLORED_OUTPUT=1 \
+      ../..
+```
+
+### Makefile Variables
+
+Pass CMake options through make:
+
+```bash
+# Treat warnings as errors
+TREAT_WARNINGS_AS_ERRORS=1 make
+
+# Disable unity builds
+DISABLE_UNITY=1 make
+
+# Disable sanitizers
+DISABLE_SANITIZER=1 make
+
+# Force 32-bit build
+FORCE_32_BIT=1 make
+```
+
+## Platform-Specific Notes
+
+### Linux
+
+Standard build works on most distributions:
+
+```bash
+make
+```
+
+### macOS
+
+#### Universal Binary (Intel + Apple Silicon)
+
+```bash
+OSX_BUILD_UNIVERSAL=1 make
+```
+
+#### Specific Architecture
+
+```bash
+# Build for Apple Silicon only
+OSX_BUILD_ARCH=arm64 make
+
+# Build for Intel only
+OSX_BUILD_ARCH=x86_64 make
+```
+
+### Windows
+
+Windows builds require Visual Studio:
+
+```bash
+mkdir build
+cd build
+cmake -G "Visual Studio 17 2022" ..
+cmake --build . --config Release
+```
+
+## Build Artifacts
+
+After building, you'll find:
+
+| Artifact | Location | Description |
+|----------|----------|-------------|
+| Static library | `build/release/src/libduckdb_static.a` | Static library |
+| Shared library | `build/release/src/libduckdb.so` | Shared library |
+| CLI executable | `build/release/duckdb` | Command-line interface |
+| Unit tests | `build/release/test/unittest` | Test runner |
+| Benchmark runner | `build/release/benchmark/benchmark_runner` | Benchmark suite (if enabled) |
+
+## Compiler Cache
+
+DuckDB automatically detects and uses `ccache` or `sccache` if available (see CMakeLists.txt:41-59).
+
+Install ccache to speed up rebuilds:
+
+```bash
+# Ubuntu/Debian
+sudo apt install ccache
+
+# macOS
+brew install ccache
+
+# Fedora/RHEL
+sudo dnf install ccache
+```
+
+## Troubleshooting
+
+### Build Failures
+
+**Out of memory during build:**
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=2 make
+```
+
+**Compiler too old:**
+- Ensure GCC 8.0+ or Clang 9.0+
+- Check version: `g++ --version` or `clang++ --version`
+
+**Git describe errors:**
+
+If you have a shallow clone:
+```bash
+git fetch --tags --unshallow
+```
+
+Or override the version:
+```bash
+OVERRIDE_GIT_DESCRIBE=v1.0.0 make
+```
+
+### Clean Build
+
+Remove all build artifacts:
+
+```bash
+make clean
+```
+
+This removes the entire `build/` directory.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Run unit tests and verify your build
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/development/contributing">
+    Learn how to contribute to DuckDB
+  </Card>
+</CardGroup>

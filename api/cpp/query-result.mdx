@@ -1,0 +1,516 @@
+---
+title: Query Result Handling
+description: Working with query results in DuckDB's C++ API
+---
+
+## Overview
+
+DuckDB's C++ API provides three types of query results:
+
+- **`QueryResult`** - Base class for all query results
+- **`MaterializedQueryResult`** - Complete result set loaded in memory
+- **`StreamQueryResult`** - Incrementally fetched results for large datasets
+
+All result types provide methods for accessing data, checking for errors, and iterating over rows.
+
+## QueryResult Base Class
+
+Defined in: `duckdb/main/query_result.hpp` (line 61)
+
+```cpp
+class QueryResult : public BaseQueryResult {
+public:
+    QueryResultType type;
+    StatementType statement_type;
+    StatementProperties properties;
+    vector<LogicalType> types;
+    vector<string> names;
+    ClientProperties client_properties;
+    unique_ptr<QueryResult> next;
+};
+```
+
+### Common Properties
+
+<ResponseField name="type" type="QueryResultType">
+  Type of result: `MATERIALIZED_RESULT`, `STREAM_RESULT`, `PENDING_RESULT`, or `ARROW_RESULT`.
+</ResponseField>
+
+<ResponseField name="statement_type" type="StatementType">
+  Type of SQL statement that produced this result (SELECT, INSERT, etc.).
+</ResponseField>
+
+<ResponseField name="types" type="vector<LogicalType>">
+  Logical types of each column in the result.
+</ResponseField>
+
+<ResponseField name="names" type="vector<string>">
+  Names of each column in the result.
+</ResponseField>
+
+### Error Handling
+
+```cpp
+bool HasError() const
+const string &GetError() const
+const ExceptionType &GetErrorType() const
+ErrorData &GetErrorObject()
+void ThrowError(const string &prepended_message = "") const
+```
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT * FROM non_existent_table");
+
+if (result->HasError()) {
+    std::cerr << "Error: " << result->GetError() << std::endl;
+    return 1;
+}
+```
+
+### Column Information
+
+```cpp
+idx_t ColumnCount()
+const string &ColumnName(idx_t index) const
+```
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT name, age, city FROM users");
+
+std::cout << "Columns: ";
+for (idx_t i = 0; i < result->ColumnCount(); i++) {
+    std::cout << result->ColumnName(i);
+    if (i < result->ColumnCount() - 1) std::cout << ", ";
+}
+std::cout << std::endl;
+```
+
+### Fetching Data
+
+```cpp
+unique_ptr<DataChunk> Fetch()
+unique_ptr<DataChunk> FetchRaw()
+```
+
+<ResponseField name="Fetch()" type="unique_ptr<DataChunk>">
+  Fetches the next chunk of normalized (flat) vectors. Returns `nullptr` when no more data is available.
+</ResponseField>
+
+<ResponseField name="FetchRaw()" type="unique_ptr<DataChunk>">
+  Fetches the next chunk without normalization. May return non-flat vector types.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT * FROM users");
+
+while (auto chunk = result->Fetch()) {
+    for (idx_t row = 0; row < chunk->size(); row++) {
+        for (idx_t col = 0; col < chunk->ColumnCount(); col++) {
+            auto value = chunk->GetValue(col, row);
+            std::cout << value.ToString() << "\t";
+        }
+        std::cout << std::endl;
+    }
+}
+```
+
+### Output Methods
+
+```cpp
+void Print()
+string ToString()
+string ToBox(ClientContext &context, const BoxRendererConfig &config)
+```
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT * FROM users LIMIT 10");
+result->Print();  // Prints to stdout in table format
+```
+
+## MaterializedQueryResult
+
+Defined in: `duckdb/main/materialized_query_result.hpp` (line 19)
+
+`MaterializedQueryResult` contains the complete result set in memory. This is returned by `Connection::Query()`.
+
+```cpp
+class MaterializedQueryResult : public QueryResult {
+public:
+    static constexpr const QueryResultType TYPE = QueryResultType::MATERIALIZED_RESULT;
+    
+    Value GetValue(idx_t column, idx_t index);
+    idx_t RowCount() const;
+    ColumnDataCollection &Collection();
+    unique_ptr<ColumnDataCollection> TakeCollection();
+};
+```
+
+### Constructor
+
+```cpp
+MaterializedQueryResult(
+    StatementType statement_type,
+    StatementProperties properties,
+    vector<string> names,
+    unique_ptr<ColumnDataCollection> collection,
+    ClientProperties client_properties
+)
+```
+
+### GetValue
+
+```cpp
+Value GetValue(idx_t column, idx_t index)
+```
+
+Gets a specific value from the result set by column and row index.
+
+<ParamField path="column" type="idx_t">
+  Column index (0-based).
+</ParamField>
+
+<ParamField path="index" type="idx_t">
+  Row index (0-based).
+</ParamField>
+
+<ResponseField name="return" type="Value">
+  The value at the specified position.
+</ResponseField>
+
+<Warning>
+This method is very slow. For performance, iterate over chunks using `Fetch()` instead.
+</Warning>
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT name, age FROM users");
+auto &materialized = result->Cast<MaterializedQueryResult>();
+
+// Access individual values (slow)
+for (idx_t row = 0; row < materialized.RowCount(); row++) {
+    auto name = materialized.GetValue(0, row).ToString();
+    auto age = materialized.GetValue(1, row).GetValue<int32_t>();
+    std::cout << name << ": " << age << std::endl;
+}
+```
+
+### RowCount
+
+```cpp
+idx_t RowCount() const
+```
+
+<ResponseField name="return" type="idx_t">
+  Total number of rows in the result set.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto result = con.Query("SELECT * FROM users");
+std::cout << "Total rows: " << result->Cast<MaterializedQueryResult>().RowCount() << std::endl;
+```
+
+### Collection
+
+```cpp
+ColumnDataCollection &Collection()
+unique_ptr<ColumnDataCollection> TakeCollection()
+```
+
+<ResponseField name="Collection()" type="ColumnDataCollection&">
+  Returns a reference to the underlying column data collection.
+</ResponseField>
+
+<ResponseField name="TakeCollection()" type="unique_ptr<ColumnDataCollection>">
+  Takes ownership of the collection. The result's collection becomes null after this operation.
+</ResponseField>
+
+## StreamQueryResult
+
+Defined in: `duckdb/main/stream_query_result.hpp` (line 26)
+
+`StreamQueryResult` allows incremental fetching of results, which is more memory-efficient for large result sets. This is returned by `Connection::SendQuery()`.
+
+```cpp
+class StreamQueryResult : public QueryResult {
+public:
+    static constexpr const QueryResultType TYPE = QueryResultType::STREAM_RESULT;
+    
+    void WaitForTask();
+    StreamExecutionResult ExecuteTask();
+    unique_ptr<MaterializedQueryResult> Materialize();
+    bool IsOpen();
+    void Close();
+    
+    shared_ptr<ClientContext> context;
+};
+```
+
+### Constructor
+
+```cpp
+StreamQueryResult(
+    StatementType statement_type,
+    StatementProperties properties,
+    vector<LogicalType> types,
+    vector<string> names,
+    ClientProperties client_properties,
+    shared_ptr<BufferedData> buffered_data
+)
+```
+
+### Execution Control
+
+```cpp
+void WaitForTask()
+StreamExecutionResult ExecuteTask()
+```
+
+<ResponseField name="WaitForTask()" type="void">
+  Reschedules tasks and waits until at least one task can be executed.
+</ResponseField>
+
+<ResponseField name="ExecuteTask()" type="StreamExecutionResult">
+  Executes a single task within the pipeline. Returns the execution status.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto result = con.SendQuery("SELECT * FROM large_table");
+
+while (auto chunk = result->Fetch()) {
+    // Process chunk
+    for (idx_t i = 0; i < chunk->size(); i++) {
+        // Process row i
+    }
+}
+```
+
+### Materialize
+
+```cpp
+unique_ptr<MaterializedQueryResult> Materialize()
+```
+
+Converts the streaming result into a materialized result by fetching all remaining data.
+
+<ResponseField name="return" type="unique_ptr<MaterializedQueryResult>">
+  Materialized version of the complete result set.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto stream_result = con.SendQuery("SELECT * FROM users");
+auto materialized = stream_result->Materialize();
+
+std::cout << "Total rows: " << materialized->RowCount() << std::endl;
+```
+
+### IsOpen / Close
+
+```cpp
+bool IsOpen()
+void Close()
+```
+
+<ResponseField name="IsOpen()" type="bool">
+  Returns `true` if the stream is still open and can be fetched from.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto result = con.SendQuery("SELECT * FROM data");
+
+if (result->IsOpen()) {
+    auto chunk = result->Fetch();
+    // ...
+}
+
+result->Close();
+```
+
+## Iterating Over Results
+
+### Range-Based For Loop
+
+QueryResult supports C++ range-based for loops:
+
+```cpp
+auto result = con.Query("SELECT name, age FROM users");
+
+for (auto &row : *result) {
+    auto name = row.GetValue<string>(0);
+    auto age = row.GetValue<int32_t>(1);
+    std::cout << name << ": " << age << std::endl;
+}
+```
+
+### Manual Iteration
+
+```cpp
+auto result = con.Query("SELECT * FROM users");
+
+for (auto it = result->begin(); it != result->end(); ++it) {
+    auto &row = *it;
+    for (idx_t col = 0; col < result->ColumnCount(); col++) {
+        std::cout << row.GetBaseValue(col).ToString() << "\t";
+    }
+    std::cout << std::endl;
+}
+```
+
+### Chunk-Based Iteration (Recommended)
+
+For best performance, iterate over chunks:
+
+```cpp
+auto result = con.Query("SELECT name, age, city FROM users");
+
+while (auto chunk = result->Fetch()) {
+    // Process entire chunk at once for vectorized operations
+    auto name_vector = chunk->data[0];  // Column 0
+    auto age_vector = chunk->data[1];   // Column 1
+    auto city_vector = chunk->data[2];  // Column 2
+    
+    for (idx_t row = 0; row < chunk->size(); row++) {
+        auto name = chunk->GetValue(0, row);
+        auto age = chunk->GetValue(1, row);
+        auto city = chunk->GetValue(2, row);
+        
+        // Process values...
+    }
+}
+```
+
+## Value Access
+
+DuckDB values can be accessed in multiple ways:
+
+```cpp
+auto result = con.Query("SELECT name, age, balance FROM users");
+
+while (auto chunk = result->Fetch()) {
+    for (idx_t row = 0; row < chunk->size(); row++) {
+        // Get as generic Value
+        auto name_value = chunk->GetValue(0, row);
+        std::string name = name_value.ToString();
+        
+        // Get as typed value
+        auto age = chunk->GetValue(1, row).GetValue<int32_t>();
+        auto balance = chunk->GetValue(2, row).GetValue<double>();
+        
+        // Check for NULL
+        if (chunk->GetValue(1, row).IsNull()) {
+            std::cout << "Age is NULL" << std::endl;
+        }
+    }
+}
+```
+
+## Usage Examples
+
+### Basic Result Iteration
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    DuckDB db(nullptr);
+    Connection con(db);
+    
+    con.Query("CREATE TABLE users(name VARCHAR, age INTEGER)");
+    con.Query("INSERT INTO users VALUES ('Alice', 30), ('Bob', 25)");
+    
+    auto result = con.Query("SELECT * FROM users");
+    
+    // Print column names
+    for (idx_t i = 0; i < result->ColumnCount(); i++) {
+        std::cout << result->ColumnName(i) << "\t";
+    }
+    std::cout << std::endl;
+    
+    // Print data
+    while (auto chunk = result->Fetch()) {
+        for (idx_t row = 0; row < chunk->size(); row++) {
+            for (idx_t col = 0; col < chunk->ColumnCount(); col++) {
+                std::cout << chunk->GetValue(col, row).ToString() << "\t";
+            }
+            std::cout << std::endl;
+        }
+    }
+}
+```
+
+### Streaming Large Results
+
+```cpp
+Connection con(db);
+
+// Use streaming for large result sets
+auto result = con.SendQuery("SELECT * FROM large_table");
+
+idx_t total_rows = 0;
+while (auto chunk = result->Fetch()) {
+    total_rows += chunk->size();
+    // Process chunk incrementally
+}
+
+std::cout << "Processed " << total_rows << " rows" << std::endl;
+```
+
+### Type-Safe Value Access
+
+```cpp
+auto result = con.Query(
+    "SELECT name, age, balance, active FROM users"
+);
+
+while (auto chunk = result->Fetch()) {
+    for (idx_t i = 0; i < chunk->size(); i++) {
+        auto name = chunk->GetValue(0, i).GetValue<string>();
+        auto age = chunk->GetValue(1, i).GetValue<int32_t>();
+        auto balance = chunk->GetValue(2, i).GetValue<double>();
+        auto active = chunk->GetValue(3, i).GetValue<bool>();
+        
+        if (active && balance > 1000.0) {
+            std::cout << name << " (age " << age << ") has balance: "
+                      << balance << std::endl;
+        }
+    }
+}
+```
+
+### Error Handling
+
+```cpp
+auto result = con.Query("SELECT * FROM possibly_missing_table");
+
+if (result->HasError()) {
+    std::cerr << "Query failed: " << result->GetError() << std::endl;
+    std::cerr << "Error type: " << (int)result->GetErrorType() << std::endl;
+    return 1;
+}
+
+result->Print();
+```
+
+## See Also
+
+- [Connection Class](./connection) - Query execution methods
+- [Database Class](./database) - Database instance management
+- [C++ API Overview](./overview) - General C++ API documentation

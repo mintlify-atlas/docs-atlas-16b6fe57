@@ -1,0 +1,305 @@
+---
+title: Database and connection management
+description: Managing DuckDB database instances and connections in C
+---
+
+The DuckDB C API uses two main types for database access: `duckdb_database` for the database instance and `duckdb_connection` for active connections.
+
+## Database Operations
+
+### Opening a Database
+
+Create or open a DuckDB database file:
+
+```c
+duckdb_state duckdb_open(const char *path, duckdb_database *out_database);
+```
+
+<ParamField path="path" type="const char*">
+  Path to the database file. Pass `NULL` for an in-memory database.
+</ParamField>
+
+<ParamField path="out_database" type="duckdb_database*" required>
+  Output parameter for the database handle.
+</ParamField>
+
+**Returns**: `DuckDBSuccess` on success, `DuckDBError` on failure.
+
+#### Examples
+
+<CodeGroup>
+
+```c In-Memory
+duckdb_database db;
+if (duckdb_open(NULL, &db) == DuckDBError) {
+    fprintf(stderr, "Failed to open in-memory database\n");
+    return 1;
+}
+```
+
+```c Persistent
+duckdb_database db;
+if (duckdb_open("my_database.duckdb", &db) == DuckDBError) {
+    fprintf(stderr, "Failed to open database file\n");
+    return 1;
+}
+```
+
+```c Read-Only
+duckdb_database db;
+duckdb_config config;
+duckdb_create_config(&config);
+duckdb_set_config(config, "access_mode", "READ_ONLY");
+
+if (duckdb_open_ext("my_database.duckdb", &db, config, NULL) == DuckDBError) {
+    fprintf(stderr, "Failed to open database\n");
+    duckdb_destroy_config(&config);
+    return 1;
+}
+duckdb_destroy_config(&config);
+```
+
+</CodeGroup>
+
+### Opening with Configuration
+
+For advanced configuration:
+
+```c
+duckdb_state duckdb_open_ext(
+    const char *path,
+    duckdb_database *out_database,
+    duckdb_config config,
+    char **out_error
+);
+```
+
+<ParamField path="config" type="duckdb_config">
+  Configuration options (can be NULL for defaults).
+</ParamField>
+
+<ParamField path="out_error" type="char**">
+  Output parameter for error message. Must be freed with `duckdb_free()` if not NULL.
+</ParamField>
+
+### Closing a Database
+
+Close the database and free resources:
+
+```c
+void duckdb_close(duckdb_database *database);
+```
+
+<Warning>
+Close all connections before closing the database. Closing a database with active connections results in undefined behavior.
+</Warning>
+
+## Connection Operations
+
+### Creating a Connection
+
+Establish a connection to the database:
+
+```c
+duckdb_state duckdb_connect(duckdb_database database, duckdb_connection *out_connection);
+```
+
+<ParamField path="database" type="duckdb_database" required>
+  The database instance to connect to.
+</ParamField>
+
+<ParamField path="out_connection" type="duckdb_connection*" required>
+  Output parameter for the connection handle.
+</ParamField>
+
+**Example**:
+
+```c
+duckdb_connection con;
+if (duckdb_connect(db, &con) == DuckDBError) {
+    fprintf(stderr, "Failed to create connection\n");
+    duckdb_close(&db);
+    return 1;
+}
+```
+
+### Multiple Connections
+
+You can create multiple connections to the same database:
+
+```c
+duckdb_database db;
+duckdb_connection con1, con2;
+
+duckdb_open("my_database.duckdb", &db);
+duckdb_connect(db, &con1);
+duckdb_connect(db, &con2);
+
+// Both connections can be used simultaneously
+duckdb_query(con1, "CREATE TABLE test(i INTEGER)", NULL);
+duckdb_query(con2, "INSERT INTO test VALUES (42)", NULL);
+
+// Clean up
+duckdb_disconnect(&con1);
+duckdb_disconnect(&con2);
+duckdb_close(&db);
+```
+
+### Disconnecting
+
+Close a connection and free its resources:
+
+```c
+void duckdb_disconnect(duckdb_connection *connection);
+```
+
+## Lifecycle Management
+
+Proper resource management is critical:
+
+<Steps>
+
+<Step title="Open database">
+
+```c
+duckdb_database db;
+duckdb_open("my_database.duckdb", &db);
+```
+
+</Step>
+
+<Step title="Create connections">
+
+```c
+duckdb_connection con;
+duckdb_connect(db, &con);
+```
+
+</Step>
+
+<Step title="Use the connection">
+
+```c
+duckdb_result result;
+duckdb_query(con, "SELECT 42", &result);
+// Process result...
+duckdb_destroy_result(&result);
+```
+
+</Step>
+
+<Step title="Clean up in reverse order">
+
+```c
+duckdb_disconnect(&con);  // Close connection first
+duckdb_close(&db);        // Then close database
+```
+
+</Step>
+
+</Steps>
+
+## Thread Safety
+
+<Info>
+**Database**: Thread-safe. A single `duckdb_database` can be shared across multiple threads.
+
+**Connection**: Not thread-safe. Each thread should create its own `duckdb_connection`.
+</Info>
+
+```c
+// Multi-threaded example (pseudocode)
+duckdb_database shared_db;
+duckdb_open("shared.duckdb", &shared_db);
+
+// Thread 1
+void* thread1_func(void* arg) {
+    duckdb_connection con1;
+    duckdb_connect(shared_db, &con1);
+    // Use con1...
+    duckdb_disconnect(&con1);
+    return NULL;
+}
+
+// Thread 2
+void* thread2_func(void* arg) {
+    duckdb_connection con2;
+    duckdb_connect(shared_db, &con2);
+    // Use con2...
+    duckdb_disconnect(&con2);
+    return NULL;
+}
+```
+
+## Configuration Options
+
+Common configuration options when opening a database:
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `access_mode` | `READ_WRITE`, `READ_ONLY` | Database access mode |
+| `threads` | Integer | Number of threads to use |
+| `max_memory` | String (e.g., "1GB") | Maximum memory limit |
+| `default_order` | `ASC`, `DESC` | Default ORDER BY direction |
+
+**Example with configuration**:
+
+```c
+duckdb_config config;
+duckdb_create_config(&config);
+
+// Set options
+duckdb_set_config(config, "threads", "4");
+duckdb_set_config(config, "max_memory", "2GB");
+
+// Open with config
+duckdb_database db;
+char *error = NULL;
+if (duckdb_open_ext("my_database.duckdb", &db, config, &error) == DuckDBError) {
+    fprintf(stderr, "Error: %s\n", error);
+    duckdb_free(error);
+}
+
+// Clean up config (database retains the settings)
+duckdb_destroy_config(&config);
+```
+
+## Error Handling
+
+Always check return values:
+
+```c
+duckdb_database db;
+duckdb_connection con;
+char *error = NULL;
+
+if (duckdb_open_ext("my_database.duckdb", &db, NULL, &error) == DuckDBError) {
+    if (error) {
+        fprintf(stderr, "Database error: %s\n", error);
+        duckdb_free(error);
+    }
+    return 1;
+}
+
+if (duckdb_connect(db, &con) == DuckDBError) {
+    fprintf(stderr, "Connection error\n");
+    duckdb_close(&db);
+    return 1;
+}
+
+// Use connection...
+
+duckdb_disconnect(&con);
+duckdb_close(&db);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Query Execution" icon="play" href="/api/c/query">
+    Execute SQL queries
+  </Card>
+  <Card title="Prepared Statements" icon="file-code" href="/api/c/prepared-statements">
+    Use parameterized queries
+  </Card>
+</CardGroup>

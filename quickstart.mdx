@@ -1,80 +1,329 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Get started with DuckDB in minutes. Learn how to create databases, run queries, and integrate DuckDB into your applications."
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
+This guide will get you up and running with DuckDB quickly, covering both CLI usage and embedded C programming.
 
-### Step 1: Set up your local environment
+## Using the CLI
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+The fastest way to start using DuckDB is through the command-line interface.
+
+<Steps>
+  <Step title="Start DuckDB">
+    Launch the DuckDB CLI:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    ./duckdb
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    This opens an in-memory database. To use a persistent database:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    ./duckdb mydata.db
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Create a table and insert data">
+    ```sql
+    CREATE TABLE users(id INTEGER, name VARCHAR, email VARCHAR);
+    INSERT INTO users VALUES 
+        (1, 'Alice', 'alice@example.com'),
+        (2, 'Bob', 'bob@example.com'),
+        (3, 'Charlie', 'charlie@example.com');
+    ```
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Query your data">
+    ```sql
+    SELECT * FROM users WHERE id > 1;
+    ```
+    
+    Output:
+    ```
+    ┌───────┬─────────┬──────────────────────┐
+    │  id   │  name   │        email         │
+    │ int32 │ varchar │       varchar        │
+    ├───────┼─────────┼──────────────────────┤
+    │     2 │ Bob     │ bob@example.com      │
+    │     3 │ Charlie │ charlie@example.com  │
+    └───────┴─────────┴──────────────────────┘
+    ```
+  </Step>
+</Steps>
 
-### Step 3: Go live
+## Querying Files Directly
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+One of DuckDB's most powerful features is the ability to query data files directly without importing:
 
-## Next steps
+<CodeGroup>
+```sql CSV
+SELECT * FROM 'data.csv' WHERE amount > 100;
+```
 
-Now that you have your docs running, explore these key features:
+```sql Parquet
+SELECT * FROM 'data.parquet' ORDER BY timestamp DESC LIMIT 10;
+```
 
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+```sql JSON
+SELECT * FROM 'data.json' WHERE status = 'active';
+```
+</CodeGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+DuckDB automatically detects file formats and handles schema inference, making data exploration incredibly fast.
 </Note>
+
+## Embedded C Example
+
+For applications that need embedded analytics, DuckDB provides a simple C API. Here's a complete working example:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+	duckdb_database db = NULL;
+	duckdb_connection con = NULL;
+	duckdb_result result;
+
+	if (duckdb_open(NULL, &db) == DuckDBError) {
+		fprintf(stderr, "Failed to open database\n");
+		goto cleanup;
+	}
+	if (duckdb_connect(db, &con) == DuckDBError) {
+		fprintf(stderr, "Failed to open connection\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "CREATE TABLE integers(i INTEGER, j INTEGER);", NULL) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "INSERT INTO integers VALUES (3, 4), (5, 6), (7, NULL);", NULL) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "SELECT * FROM integers", &result) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	// print the names of the result
+	idx_t row_count = duckdb_row_count(&result);
+	idx_t column_count = duckdb_column_count(&result);
+	for (size_t i = 0; i < column_count; i++) {
+		printf("%s ", duckdb_column_name(&result, i));
+	}
+	printf("\n");
+	// print the data of the result
+	for (size_t row_idx = 0; row_idx < row_count; row_idx++) {
+		for (size_t col_idx = 0; col_idx < column_count; col_idx++) {
+			char *val = duckdb_value_varchar(&result, col_idx, row_idx);
+			printf("%s ", val);
+			duckdb_free(val);
+		}
+		printf("\n");
+	}
+cleanup:
+	duckdb_destroy_result(&result);
+	duckdb_disconnect(&con);
+	duckdb_close(&db);
+}
+```
+
+### Understanding the C API
+
+<Steps>
+  <Step title="Initialize database and connection">
+    ```c
+    duckdb_database db = NULL;
+    duckdb_connection con = NULL;
+    
+    // Open database (NULL = in-memory)
+    duckdb_open(NULL, &db);
+    
+    // Create connection to database
+    duckdb_connect(db, &con);
+    ```
+    
+    Pass a filename to `duckdb_open()` for persistent storage:
+    ```c
+    duckdb_open("mydata.db", &db);
+    ```
+  </Step>
+
+  <Step title="Execute queries">
+    ```c
+    // Queries that don't return results (DDL, DML)
+    duckdb_query(con, "CREATE TABLE integers(i INTEGER, j INTEGER);", NULL);
+    duckdb_query(con, "INSERT INTO integers VALUES (3, 4), (5, 6);", NULL);
+    
+    // Queries that return results
+    duckdb_result result;
+    duckdb_query(con, "SELECT * FROM integers", &result);
+    ```
+  </Step>
+
+  <Step title="Process query results">
+    ```c
+    // Get result metadata
+    idx_t row_count = duckdb_row_count(&result);
+    idx_t column_count = duckdb_column_count(&result);
+    const char *col_name = duckdb_column_name(&result, 0);
+    
+    // Access values
+    for (size_t row = 0; row < row_count; row++) {
+        for (size_t col = 0; col < column_count; col++) {
+            char *val = duckdb_value_varchar(&result, col, row);
+            printf("%s ", val);
+            duckdb_free(val);  // Important: free allocated strings
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Clean up resources">
+    ```c
+    duckdb_destroy_result(&result);
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+    ```
+    
+    Always clean up in reverse order of creation.
+  </Step>
+</Steps>
+
+## Embedded C++ Example
+
+The C++ API provides a more ergonomic interface with RAII and exceptions:
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+	// Open database (nullptr = in-memory)
+	DuckDB db(nullptr);
+
+	// Create connection
+	Connection con(db);
+
+	// Execute queries
+	con.Query("CREATE TABLE integers(i INTEGER)");
+	con.Query("INSERT INTO integers VALUES (3)");
+	
+	// Query and print results
+	auto result = con.Query("SELECT * FROM integers");
+	result->Print();
+}
+```
+
+<Note>
+The C++ API automatically handles resource cleanup through destructors, making it less error-prone than the C API.
+</Note>
+
+## Common SQL Operations
+
+Here are some common analytical queries you can run:
+
+<CodeGroup>
+```sql Aggregation
+SELECT 
+    department,
+    COUNT(*) as employee_count,
+    AVG(salary) as avg_salary,
+    MAX(salary) as max_salary
+FROM employees
+GROUP BY department
+ORDER BY avg_salary DESC;
+```
+
+```sql Window Functions
+SELECT 
+    name,
+    salary,
+    department,
+    AVG(salary) OVER (PARTITION BY department) as dept_avg,
+    RANK() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank
+FROM employees;
+```
+
+```sql Joins
+SELECT 
+    o.order_id,
+    c.customer_name,
+    SUM(oi.quantity * oi.price) as total
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN order_items oi ON o.order_id = oi.order_id
+GROUP BY o.order_id, c.customer_name;
+```
+
+```sql Complex Types
+SELECT 
+    id,
+    {'name': name, 'email': email} as contact,
+    [phone1, phone2, phone3] as phone_numbers
+FROM users;
+```
+</CodeGroup>
+
+## Working with Real Data
+
+DuckDB excels at analyzing real-world data files:
+
+```sql
+-- Analyze a large CSV file without importing
+SELECT 
+    DATE_TRUNC('month', timestamp) as month,
+    COUNT(*) as events,
+    COUNT(DISTINCT user_id) as unique_users
+FROM 'logs.csv'
+WHERE event_type = 'purchase'
+GROUP BY month
+ORDER BY month;
+
+-- Query multiple Parquet files at once
+SELECT 
+    product_category,
+    SUM(revenue) as total_revenue
+FROM 'sales_data/*.parquet'
+GROUP BY product_category;
+```
+
+<Warning>
+When querying large files, DuckDB automatically uses streaming and parallel processing, but keep in mind that complex operations may require significant memory.
+</Warning>
+
+## Next Steps
+
+Now that you understand the basics, explore more advanced features:
+
+<CardGroup cols={2}>
+  <Card title="SQL Reference" icon="book" href="https://duckdb.org/docs/stable/sql/introduction">
+    Learn about DuckDB's rich SQL dialect and advanced features
+  </Card>
+  
+  <Card title="Data Import" icon="file-import" href="https://duckdb.org/docs/stable/data/overview">
+    Deep dive into importing and exporting data in various formats
+  </Card>
+  
+  <Card title="Client APIs" icon="code" href="https://duckdb.org/docs/stable/api/overview">
+    Explore Python, R, Java, and other client libraries
+  </Card>
+  
+  <Card title="Extensions" icon="puzzle-piece" href="https://duckdb.org/docs/stable/extensions/overview">
+    Extend DuckDB with additional functionality
+  </Card>
+</CardGroup>
+
+## Tips and Tricks
+
+- Use `DESCRIBE table_name;` to see table schema
+- Use `.tables` to list all tables (CLI)
+- Use `.schema table_name` to see CREATE statement (CLI)
+- Use `EXPLAIN` to see query execution plans
+- Enable profiling with `PRAGMA enable_profiling;` to optimize queries
+- Use `COPY` command for fast bulk data import/export

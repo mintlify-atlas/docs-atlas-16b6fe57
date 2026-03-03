@@ -1,0 +1,332 @@
+---
+title: Database Class
+description: DuckDB database instance management in C++
+---
+
+## Overview
+
+The `DuckDB` class represents a database instance and holds all database-specific metadata, including the catalog, transaction manager, and storage. Each database instance can be accessed by multiple `Connection` objects.
+
+Defined in: `duckdb/main/database.hpp` (line 106)
+
+```cpp
+class DuckDB {
+public:
+    explicit DuckDB(const char *path = nullptr, DBConfig *config = nullptr);
+    explicit DuckDB(const string &path, DBConfig *config = nullptr);
+    explicit DuckDB(DatabaseInstance &instance);
+    ~DuckDB();
+    
+    shared_ptr<DatabaseInstance> instance;
+};
+```
+
+## Constructors
+
+### Default Constructor
+
+```cpp
+DuckDB(const char *path = nullptr, DBConfig *config = nullptr)
+```
+
+Creates a new DuckDB database instance.
+
+<ParamField path="path" type="const char*" default="nullptr">
+  Path to the database file. If `nullptr`, creates an in-memory database.
+</ParamField>
+
+<ParamField path="config" type="DBConfig*" default="nullptr">
+  Database configuration options. If `nullptr`, uses default configuration.
+</ParamField>
+
+**Examples:**
+
+<CodeGroup>
+```cpp In-Memory
+// Create an in-memory database
+DuckDB db(nullptr);
+```
+
+```cpp Persistent
+// Create or open a persistent database
+DuckDB db("my_database.db");
+```
+
+```cpp With String Path
+// Using std::string
+std::string db_path = "data/analytics.db";
+DuckDB db(db_path);
+```
+</CodeGroup>
+
+### Constructor with Configuration
+
+```cpp
+DuckDB(const char *path, DBConfig *config)
+```
+
+Creates a database with custom configuration.
+
+**Example:**
+
+```cpp
+DBConfig config;
+config.options.access_mode = AccessMode::READ_ONLY;
+config.options.maximum_memory = 1024 * 1024 * 1024; // 1GB
+
+DuckDB db("my_database.db", &config);
+```
+
+### Instance Constructor
+
+```cpp
+DuckDB(DatabaseInstance &instance)
+```
+
+Creates a database from an existing `DatabaseInstance`.
+
+<ParamField path="instance" type="DatabaseInstance&">
+  An existing database instance to wrap.
+</ParamField>
+
+## Member Variables
+
+### instance
+
+```cpp
+shared_ptr<DatabaseInstance> instance
+```
+
+<ResponseField name="instance" type="shared_ptr<DatabaseInstance>">
+  Reference to the actual database instance. This shared pointer allows multiple `DuckDB` objects to reference the same underlying database.
+</ResponseField>
+
+## Methods
+
+### LoadStaticExtension
+
+```cpp
+template <class T>
+void LoadStaticExtension()
+```
+
+Loads a statically linked extension by its class type.
+
+**Example:**
+
+```cpp
+DuckDB db("my_database.db");
+db.LoadStaticExtension<MyExtension>();
+```
+
+### GetFileSystem
+
+```cpp
+FileSystem &GetFileSystem()
+```
+
+<ResponseField name="return" type="FileSystem&">
+  Reference to the file system used by this database.
+</ResponseField>
+
+Returns the file system instance associated with the database.
+
+### NumberOfThreads
+
+```cpp
+idx_t NumberOfThreads()
+```
+
+<ResponseField name="return" type="idx_t">
+  Number of threads configured for this database instance.
+</ResponseField>
+
+Returns the number of threads available for parallel query execution.
+
+**Example:**
+
+```cpp
+DuckDB db(nullptr);
+auto num_threads = db.NumberOfThreads();
+std::cout << "Using " << num_threads << " threads" << std::endl;
+```
+
+### ExtensionIsLoaded
+
+```cpp
+bool ExtensionIsLoaded(const string &name)
+```
+
+<ParamField path="name" type="const string&">
+  Name of the extension to check.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the extension is loaded, `false` otherwise.
+</ResponseField>
+
+Checks whether an extension is currently loaded.
+
+**Example:**
+
+```cpp
+if (db.ExtensionIsLoaded("parquet")) {
+    std::cout << "Parquet extension is loaded" << std::endl;
+}
+```
+
+## Static Methods
+
+### SourceID
+
+```cpp
+static const char *SourceID()
+```
+
+<ResponseField name="return" type="const char*">
+  Git commit hash of the DuckDB source code.
+</ResponseField>
+
+Returns the source code identifier (git hash) of the DuckDB build.
+
+### LibraryVersion
+
+```cpp
+static const char *LibraryVersion()
+```
+
+<ResponseField name="return" type="const char*">
+  Version string of the DuckDB library (e.g., "v1.0.0").
+</ResponseField>
+
+Returns the version string of the DuckDB library.
+
+**Example:**
+
+```cpp
+std::cout << "DuckDB version: " << DuckDB::LibraryVersion() << std::endl;
+```
+
+### ReleaseCodename
+
+```cpp
+static const char *ReleaseCodename()
+```
+
+<ResponseField name="return" type="const char*">
+  Codename of the current DuckDB release.
+</ResponseField>
+
+Returns the codename of the current release.
+
+### StandardVectorSize
+
+```cpp
+static idx_t StandardVectorSize()
+```
+
+<ResponseField name="return" type="idx_t">
+  Standard vector size used by DuckDB (typically 2048).
+</ResponseField>
+
+Returns the standard vector size used internally by DuckDB for vectorized processing.
+
+### Platform
+
+```cpp
+static string Platform()
+```
+
+<ResponseField name="return" type="string">
+  Platform identifier string (e.g., "linux_amd64").
+</ResponseField>
+
+Returns a string describing the platform DuckDB was built for.
+
+## Configuration Options
+
+The `DBConfig` structure contains various configuration options:
+
+```cpp
+DBConfig config;
+
+// Access mode
+config.options.access_mode = AccessMode::READ_ONLY;  // or READ_WRITE, AUTOMATIC
+
+// Memory limit
+config.options.maximum_memory = 1024 * 1024 * 1024;  // 1GB
+
+// Thread count
+config.options.maximum_threads = 4;
+
+// Checkpoint threshold
+config.options.checkpoint_wal_size = 16 * 1024 * 1024;  // 16MB
+
+DuckDB db("database.db", &config);
+```
+
+## Usage Examples
+
+### Basic Database Creation
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    // In-memory database
+    DuckDB db(nullptr);
+    
+    // Create a connection
+    Connection con(db);
+    con.Query("CREATE TABLE test(i INTEGER)");
+}
+```
+
+### Persistent Database with Configuration
+
+```cpp
+DBConfig config;
+config.options.access_mode = AccessMode::READ_WRITE;
+config.options.maximum_threads = 8;
+
+DuckDB db("analytics.db", &config);
+Connection con(db);
+
+auto result = con.Query("SELECT version()");
+result->Print();
+```
+
+### Multiple Connections
+
+```cpp
+DuckDB db("shared.db");
+
+// Multiple connections to the same database
+Connection con1(db);
+Connection con2(db);
+
+con1.Query("CREATE TABLE data(x INTEGER)");
+con2.Query("INSERT INTO data VALUES (42)");
+
+auto result = con1.Query("SELECT * FROM data");
+result->Print();  // Shows the data inserted via con2
+```
+
+### Checking Version Information
+
+```cpp
+DuckDB db(nullptr);
+
+std::cout << "DuckDB Version: " << DuckDB::LibraryVersion() << std::endl;
+std::cout << "Source ID: " << DuckDB::SourceID() << std::endl;
+std::cout << "Platform: " << DuckDB::Platform() << std::endl;
+std::cout << "Threads: " << db.NumberOfThreads() << std::endl;
+```
+
+## See Also
+
+- [Connection Class](./connection) - Creating connections and executing queries
+- [Query Results](./query-result) - Working with query results
+- [C++ API Overview](./overview) - General C++ API documentation

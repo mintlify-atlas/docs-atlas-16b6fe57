@@ -1,0 +1,197 @@
+---
+title: C API overview
+description: Introduction to DuckDB's C API for embedded usage
+---
+
+The DuckDB C API provides a low-level interface for embedding DuckDB in C applications. It follows a simple design with opaque handles and explicit resource management.
+
+## Basic Usage Pattern
+
+The typical workflow for using the C API:
+
+<Steps>
+
+<Step title="Open a database">
+
+Create or open a DuckDB database file:
+
+```c
+duckdb_database db;
+duckdb_state state = duckdb_open("my_database.db", &db);
+if (state == DuckDBError) {
+    // Handle error
+}
+```
+
+Pass `NULL` for an in-memory database.
+
+</Step>
+
+<Step title="Create a connection">
+
+Establish a connection to the database:
+
+```c
+duckdb_connection con;
+state = duckdb_connect(db, &con);
+if (state == DuckDBError) {
+    // Handle error
+}
+```
+
+</Step>
+
+<Step title="Execute queries">
+
+Run SQL queries and process results:
+
+```c
+duckdb_result result;
+state = duckdb_query(con, "SELECT * FROM my_table", &result);
+if (state == DuckDBSuccess) {
+    // Process result
+    duckdb_destroy_result(&result);
+}
+```
+
+</Step>
+
+<Step title="Clean up resources">
+
+Always free resources in reverse order:
+
+```c
+duckdb_disconnect(&con);
+duckdb_close(&db);
+```
+
+</Step>
+
+</Steps>
+
+## Core Types
+
+The C API uses opaque handle types:
+
+- `duckdb_database` - Database instance handle
+- `duckdb_connection` - Connection handle
+- `duckdb_result` - Query result set
+- `duckdb_prepared_statement` - Prepared statement handle
+- `duckdb_appender` - Bulk data appender handle
+
+## Return Values
+
+Most functions return `duckdb_state`:
+
+```c
+typedef enum duckdb_state {
+    DuckDBSuccess = 0,
+    DuckDBError = 1
+} duckdb_state;
+```
+
+Always check return values and handle errors appropriately.
+
+## Complete Example
+
+Here's a complete C program using the DuckDB API:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+    duckdb_database db = NULL;
+    duckdb_connection con = NULL;
+    duckdb_result result;
+
+    // Open in-memory database
+    if (duckdb_open(NULL, &db) == DuckDBError) {
+        fprintf(stderr, "Failed to open database\n");
+        return 1;
+    }
+
+    // Create connection
+    if (duckdb_connect(db, &con) == DuckDBError) {
+        fprintf(stderr, "Failed to create connection\n");
+        duckdb_close(&db);
+        return 1;
+    }
+
+    // Create table
+    if (duckdb_query(con, "CREATE TABLE integers(i INTEGER, j INTEGER)", NULL) == DuckDBError) {
+        fprintf(stderr, "Failed to create table\n");
+        goto cleanup;
+    }
+
+    // Insert data
+    if (duckdb_query(con, "INSERT INTO integers VALUES (3, 4), (5, 6)", NULL) == DuckDBError) {
+        fprintf(stderr, "Failed to insert data\n");
+        goto cleanup;
+    }
+
+    // Query data
+    if (duckdb_query(con, "SELECT * FROM integers", &result) == DuckDBError) {
+        fprintf(stderr, "Failed to query\n");
+        goto cleanup;
+    }
+
+    // Process results
+    idx_t row_count = duckdb_row_count(&result);
+    idx_t col_count = duckdb_column_count(&result);
+
+    for (idx_t i = 0; i < col_count; i++) {
+        printf("%s ", duckdb_column_name(&result, i));
+    }
+    printf("\n");
+
+    for (idx_t row = 0; row < row_count; row++) {
+        for (idx_t col = 0; col < col_count; col++) {
+            char *val = duckdb_value_varchar(&result, col, row);
+            printf("%s ", val);
+            duckdb_free(val);
+        }
+        printf("\n");
+    }
+
+    duckdb_destroy_result(&result);
+
+cleanup:
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+    return 0;
+}
+```
+
+## Memory Management
+
+<Warning>
+The C API requires manual memory management. Always:
+- Check return codes
+- Free allocated resources
+- Call `duckdb_free()` on strings returned by the API
+- Destroy results with `duckdb_destroy_result()`
+</Warning>
+
+## Thread Safety
+
+- A `duckdb_database` can be shared across threads
+- Each thread should have its own `duckdb_connection`
+- Do not share connections between threads
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Connection Management" icon="link" href="/api/c/connection">
+    Learn about database and connection lifecycle
+  </Card>
+  <Card title="Query Execution" icon="play" href="/api/c/query">
+    Execute queries and handle results
+  </Card>
+  <Card title="Prepared Statements" icon="file-code" href="/api/c/prepared-statements">
+    Use parameterized queries
+  </Card>
+  <Card title="Data Types" icon="table" href="/api/c/data-types">
+    Work with DuckDB data types
+  </Card>
+</CardGroup>

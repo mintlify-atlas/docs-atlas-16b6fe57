@@ -1,0 +1,325 @@
+---
+title: Executing queries
+description: Execute SQL queries and process results with the DuckDB C API
+---
+
+The DuckDB C API provides functions for executing SQL queries and handling results.
+
+## Basic Query Execution
+
+### Simple Queries
+
+Execute a SQL query and retrieve results:
+
+```c
+duckdb_state duckdb_query(
+    duckdb_connection connection,
+    const char *query,
+    duckdb_result *out_result
+);
+```
+
+<ParamField path="connection" type="duckdb_connection" required>
+  Active database connection.
+</ParamField>
+
+<ParamField path="query" type="const char*" required>
+  SQL query string to execute.
+</ParamField>
+
+<ParamField path="out_result" type="duckdb_result*">
+  Output parameter for query results. Pass NULL if you don't need results (e.g., for DDL statements).
+</ParamField>
+
+**Returns**: `DuckDBSuccess` on success, `DuckDBError` on failure.
+
+<CodeGroup>
+
+```c DDL Statement
+// No result needed
+if (duckdb_query(con, "CREATE TABLE test(i INTEGER)", NULL) == DuckDBError) {
+    fprintf(stderr, "Failed to create table\n");
+}
+```
+
+```c DML Statement
+// No result needed for INSERT
+if (duckdb_query(con, "INSERT INTO test VALUES (42), (43)", NULL) == DuckDBError) {
+    fprintf(stderr, "Failed to insert\n");
+}
+```
+
+```c SELECT Query
+duckdb_result result;
+if (duckdb_query(con, "SELECT * FROM test", &result) == DuckDBSuccess) {
+    // Process result...
+    duckdb_destroy_result(&result);
+}
+```
+
+</CodeGroup>
+
+## Working with Results
+
+### Result Structure
+
+The `duckdb_result` struct contains query results:
+
+```c
+typedef struct {
+    idx_t column_count;     // Internal: use duckdb_column_count()
+    idx_t row_count;        // Internal: use duckdb_row_count()
+    idx_t rows_changed;     // Internal: use duckdb_rows_changed()
+    // ... other internal fields
+} duckdb_result;
+```
+
+<Warning>
+Never access `duckdb_result` fields directly. Always use the provided accessor functions.
+</Warning>
+
+### Result Metadata
+
+Get information about query results:
+
+```c
+// Get number of columns
+idx_t duckdb_column_count(duckdb_result *result);
+
+// Get number of rows
+idx_t duckdb_row_count(duckdb_result *result);
+
+// Get column name
+const char *duckdb_column_name(duckdb_result *result, idx_t col);
+
+// Get column type
+duckdb_type duckdb_column_type(duckdb_result *result, idx_t col);
+
+// Get number of rows affected (for INSERT/UPDATE/DELETE)
+idx_t duckdb_rows_changed(duckdb_result *result);
+```
+
+**Example**:
+
+```c
+duckdb_result result;
+if (duckdb_query(con, "SELECT * FROM integers", &result) == DuckDBSuccess) {
+    idx_t col_count = duckdb_column_count(&result);
+    idx_t row_count = duckdb_row_count(&result);
+
+    // Print column headers
+    for (idx_t i = 0; i < col_count; i++) {
+        printf("%s\t", duckdb_column_name(&result, i));
+    }
+    printf("\n");
+
+    duckdb_destroy_result(&result);
+}
+```
+
+### Accessing Values
+
+Extract values from results:
+
+```c
+// Generic varchar extraction (works for all types)
+char *duckdb_value_varchar(duckdb_result *result, idx_t col, idx_t row);
+
+// Type-specific extraction
+bool duckdb_value_boolean(duckdb_result *result, idx_t col, idx_t row);
+int8_t duckdb_value_int8(duckdb_result *result, idx_t col, idx_t row);
+int16_t duckdb_value_int16(duckdb_result *result, idx_t col, idx_t row);
+int32_t duckdb_value_int32(duckdb_result *result, idx_t col, idx_t row);
+int64_t duckdb_value_int64(duckdb_result *result, idx_t col, idx_t row);
+float duckdb_value_float(duckdb_result *result, idx_t col, idx_t row);
+double duckdb_value_double(duckdb_result *result, idx_t col, idx_t row);
+duckdb_date duckdb_value_date(duckdb_result *result, idx_t col, idx_t row);
+duckdb_time duckdb_value_time(duckdb_result *result, idx_t col, idx_t row);
+duckdb_timestamp duckdb_value_timestamp(duckdb_result *result, idx_t col, idx_t row);
+
+// Check for NULL
+bool duckdb_value_is_null(duckdb_result *result, idx_t col, idx_t row);
+```
+
+<Note>
+`duckdb_value_varchar()` returns a malloc-allocated string that must be freed with `duckdb_free()`.
+</Note>
+
+**Complete example**:
+
+```c
+duckdb_result result;
+if (duckdb_query(con, "SELECT name, age, salary FROM employees", &result) == DuckDBSuccess) {
+    idx_t row_count = duckdb_row_count(&result);
+    idx_t col_count = duckdb_column_count(&result);
+
+    for (idx_t row = 0; row < row_count; row++) {
+        // Check for NULL
+        if (duckdb_value_is_null(&result, 0, row)) {
+            printf("NULL\t");
+        } else {
+            char *name = duckdb_value_varchar(&result, 0, row);
+            printf("%s\t", name);
+            duckdb_free(name);
+        }
+
+        // Integer column
+        int32_t age = duckdb_value_int32(&result, 1, row);
+        printf("%d\t", age);
+
+        // Double column
+        double salary = duckdb_value_double(&result, 2, row);
+        printf("%.2f\n", salary);
+    }
+
+    duckdb_destroy_result(&result);
+}
+```
+
+### Error Handling
+
+Check for query errors:
+
+```c
+const char *duckdb_result_error(duckdb_result *result);
+```
+
+**Returns**: Error message if the query failed, NULL if successful.
+
+```c
+duckdb_result result;
+if (duckdb_query(con, "SELECT * FROM nonexistent_table", &result) == DuckDBError) {
+    const char *error = duckdb_result_error(&result);
+    if (error) {
+        fprintf(stderr, "Query error: %s\n", error);
+    }
+    duckdb_destroy_result(&result);
+}
+```
+
+### Destroying Results
+
+Always free result resources:
+
+```c
+void duckdb_destroy_result(duckdb_result *result);
+```
+
+<Warning>
+Failing to call `duckdb_destroy_result()` causes memory leaks. Call it even if the query failed.
+</Warning>
+
+## Data Chunks (Advanced)
+
+For better performance with large result sets, access data chunks directly:
+
+```c
+duckdb_data_chunk duckdb_result_get_chunk(duckdb_result result, idx_t chunk_index);
+idx_t duckdb_result_chunk_count(duckdb_result result);
+```
+
+This avoids materialization overhead and processes data in vectorized batches.
+
+## Statement Types
+
+Check the type of statement executed:
+
+```c
+duckdb_statement_type duckdb_result_statement_type(duckdb_result result);
+```
+
+Returns one of:
+- `DUCKDB_STATEMENT_TYPE_SELECT`
+- `DUCKDB_STATEMENT_TYPE_INSERT`
+- `DUCKDB_STATEMENT_TYPE_UPDATE`
+- `DUCKDB_STATEMENT_TYPE_DELETE`
+- `DUCKDB_STATEMENT_TYPE_CREATE`
+- etc.
+
+## Complete Example
+
+Full example with error handling:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+    duckdb_database db;
+    duckdb_connection con;
+    duckdb_result result;
+
+    // Open database and create connection
+    if (duckdb_open(NULL, &db) == DuckDBError ||
+        duckdb_connect(db, &con) == DuckDBError) {
+        fprintf(stderr, "Failed to open database\n");
+        return 1;
+    }
+
+    // Create table
+    if (duckdb_query(con, "CREATE TABLE test(id INTEGER, name VARCHAR)", NULL) == DuckDBError) {
+        fprintf(stderr, "Failed to create table\n");
+        goto cleanup;
+    }
+
+    // Insert data
+    const char *insert_sql = "INSERT INTO test VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie')";
+    if (duckdb_query(con, insert_sql, NULL) == DuckDBError) {
+        fprintf(stderr, "Failed to insert data\n");
+        goto cleanup;
+    }
+
+    // Query data
+    if (duckdb_query(con, "SELECT * FROM test WHERE id > 1", &result) == DuckDBError) {
+        const char *error = duckdb_result_error(&result);
+        fprintf(stderr, "Query failed: %s\n", error ? error : "unknown error");
+        duckdb_destroy_result(&result);
+        goto cleanup;
+    }
+
+    // Print results
+    idx_t row_count = duckdb_row_count(&result);
+    idx_t col_count = duckdb_column_count(&result);
+
+    // Headers
+    for (idx_t i = 0; i < col_count; i++) {
+        printf("%s\t", duckdb_column_name(&result, i));
+    }
+    printf("\n");
+
+    // Data
+    for (idx_t row = 0; row < row_count; row++) {
+        for (idx_t col = 0; col < col_count; col++) {
+            if (duckdb_value_is_null(&result, col, row)) {
+                printf("NULL\t");
+            } else {
+                char *val = duckdb_value_varchar(&result, col, row);
+                printf("%s\t", val);
+                duckdb_free(val);
+            }
+        }
+        printf("\n");
+    }
+
+    duckdb_destroy_result(&result);
+
+cleanup:
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+    return 0;
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Prepared Statements" icon="file-code" href="/api/c/prepared-statements">
+    Use parameterized queries for better performance and security
+  </Card>
+  <Card title="Appender" icon="database" href="/api/c/appender">
+    Bulk load data efficiently
+  </Card>
+  <Card title="Data Types" icon="table" href="/api/c/data-types">
+    Work with complex data types
+  </Card>
+</CardGroup>

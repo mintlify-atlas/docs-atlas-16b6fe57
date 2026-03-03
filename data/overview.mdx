@@ -1,0 +1,135 @@
+---
+title: Data Import and Export Overview
+description: Learn how to import and export data in DuckDB using native file format support
+---
+
+DuckDB provides seamless data import and export capabilities with native support for multiple file formats. You can query files directly without creating tables first, making data analysis fast and efficient.
+
+## Native File Format Support
+
+DuckDB natively supports reading from and writing to several file formats:
+
+- **CSV** - Comma-separated values with automatic type detection
+- **Parquet** - Columnar format for efficient analytical queries
+- **JSON** - Newline-delimited JSON and standard JSON arrays
+
+These formats can be queried directly in SQL without manual schema definition or data loading steps.
+
+## Reading Data
+
+The simplest way to read data is by referencing the file directly in your SQL query:
+
+<CodeGroup>
+```sql CSV
+SELECT * FROM 'data.csv';
+```
+
+```sql Parquet
+SELECT * FROM 'data.parquet';
+```
+
+```sql JSON
+SELECT * FROM 'data.json';
+```
+</CodeGroup>
+
+DuckDB automatically detects the file format based on the file extension and infers the schema.
+
+## Writing Data with COPY
+
+The `COPY` statement exports query results or table data to files:
+
+<CodeGroup>
+```sql Export Table
+COPY my_table TO 'output.parquet';
+```
+
+```sql Export Query Results
+COPY (SELECT * FROM my_table WHERE id < 100) TO 'filtered.csv';
+```
+
+```sql With Format Options
+COPY my_table TO 'output.csv' (DELIMITER ',', HEADER true);
+```
+</CodeGroup>
+
+## Import Data with COPY
+
+You can also use `COPY` to import data into existing tables:
+
+```sql
+CREATE TABLE sales (date DATE, amount DECIMAL, product VARCHAR);
+COPY sales FROM 'sales_data.csv';
+```
+
+This statement loads data from the CSV file into the `sales` table, automatically mapping columns by position or name.
+
+## Automatic Type Detection
+
+DuckDB automatically detects data types when reading files:
+
+```sql
+-- DuckDB infers that Year is BIGINT and Quarter is BIGINT
+SELECT typeof(Year), typeof(Quarter) 
+FROM 'ontime_sample.csv' 
+LIMIT 1;
+```
+
+You can override automatic detection using the `dtypes` parameter:
+
+```sql
+SELECT * FROM read_csv_auto('data.csv', 
+  dtypes={'Quarter': 'TINYINT'}
+);
+```
+
+## Multiple Files and Globs
+
+Query multiple files at once using glob patterns:
+
+<CodeGroup>
+```sql Wildcard Pattern
+SELECT * FROM 'data/*.parquet';
+```
+
+```sql Multiple Patterns
+SELECT * FROM ['file1.csv', 'file2.csv'];
+```
+
+```sql Hive Partitioning
+SELECT * FROM read_csv_auto(
+  'data/part=*/date=*/data.csv',
+  HIVE_PARTITIONING=1
+);
+```
+</CodeGroup>
+
+## Export Database
+
+Export an entire database with all tables and schemas:
+
+```sql
+EXPORT DATABASE 'my_backup' (FORMAT PARQUET);
+```
+
+Import it back later:
+
+```sql
+IMPORT DATABASE 'my_backup';
+```
+
+## Format-Specific Options
+
+Each file format supports specific options for fine-tuned control:
+
+- [CSV Options](/data/csv) - Delimiters, quotes, headers, null handling
+- [Parquet Options](/data/parquet) - Compression codecs, row group size, encryption
+- [JSON Options](/data/json) - Format detection, record handling, type inference
+
+## Performance Tips
+
+- Use Parquet for large analytical datasets (columnar format enables efficient querying)
+- Use CSV for interoperability with other tools
+- Use JSON for semi-structured or nested data
+- Enable Hive partitioning for partitioned datasets to skip unnecessary file reads
+- Use `COPY` instead of `INSERT` for bulk data loading

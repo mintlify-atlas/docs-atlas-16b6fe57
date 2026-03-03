@@ -1,0 +1,441 @@
+---
+title: Join Operations
+description: Comprehensive guide to INNER, LEFT, RIGHT, and FULL OUTER joins in DuckDB
+---
+
+Joins combine rows from two or more tables based on related columns. DuckDB supports all standard SQL join types with optimized execution strategies.
+
+## Join Types
+
+DuckDB supports the following join types:
+
+- **INNER JOIN**: Returns rows when there is a match in both tables
+- **LEFT OUTER JOIN** (or LEFT JOIN): Returns all rows from left table, matched rows from right
+- **RIGHT OUTER JOIN** (or RIGHT JOIN): Returns all rows from right table, matched rows from left
+- **FULL OUTER JOIN**: Returns all rows from both tables, with NULLs where no match
+- **CROSS JOIN**: Cartesian product of both tables
+
+## INNER JOIN
+
+INNER JOIN returns only rows that have matching values in both tables.
+
+### Basic INNER JOIN
+
+<CodeGroup>
+```sql Explicit JOIN Syntax
+CREATE TABLE test (a INTEGER, b INTEGER);
+INSERT INTO test VALUES (11, 1), (12, 2), (13, 3);
+
+CREATE TABLE test2 (b INTEGER, c INTEGER);
+INSERT INTO test2 VALUES (1, 10), (1, 20), (2, 30);
+
+SELECT a, test.b, c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b 
+ORDER BY c;
+```
+
+```sql Comma Join (Implicit)
+SELECT a, test.b, c 
+FROM test, test2 
+WHERE test.b = test2.b 
+ORDER BY c;
+```
+</CodeGroup>
+
+Both queries return:
+```
+11  1   10
+11  1   20
+12  2   30
+```
+
+### JOIN Conditions
+
+<CodeGroup>
+```sql Equality Join
+SELECT a, test.b, c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b;
+```
+
+```sql Multiple Conditions
+SELECT a, test.b, c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b AND test.a - 1 = test2.c;
+```
+
+```sql Non-Equality Join
+SELECT a, test.b, c
+FROM test
+INNER JOIN test2 ON test.b = test2.b AND test.b = 2;
+```
+</CodeGroup>
+
+### Using Join Columns in Subqueries
+
+```sql
+SELECT 
+  a, 
+  (SELECT test.a) AS subquery_a, 
+  c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b 
+ORDER BY c;
+```
+
+## LEFT OUTER JOIN
+
+LEFT OUTER JOIN returns all rows from the left table and matched rows from the right table. When no match exists, NULL values are used for right table columns.
+
+<CodeGroup>
+```sql Basic LEFT JOIN
+CREATE TABLE integers(i INTEGER, j INTEGER);
+INSERT INTO integers VALUES (1, 2), (2, 3), (3, 4);
+
+CREATE TABLE integers2(k INTEGER, l INTEGER);
+INSERT INTO integers2 VALUES (1, 10), (2, 20);
+
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON integers.i = integers2.k 
+ORDER BY i;
+```
+
+```sql Result
+-- i    j    k       l
+-- 1    2    1       10
+-- 2    3    2       20
+-- 3    4    NULL    NULL
+```
+</CodeGroup>
+
+### LEFT JOIN Semantics
+
+Understanding WHERE vs ON conditions:
+
+<CodeGroup>
+```sql WHERE filters after join
+-- Filters out NULL rows (equivalent to INNER JOIN)
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON integers.i = integers2.k  
+WHERE k IS NOT NULL 
+ORDER BY i;
+-- Returns: (1,2,1,10), (2,3,2,20)
+```
+
+```sql ON filters before join
+-- Conditions in ON happen before NULL generation
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 
+  ON integers.i = integers2.k AND integers2.k IS NOT NULL 
+ORDER BY i;
+-- Returns: (1,2,1,10), (2,3,2,20), (3,4,NULL,NULL)
+```
+</CodeGroup>
+
+<Note>
+Conditions in the ON clause are evaluated before the LEFT JOIN generates NULL values. Conditions in WHERE are evaluated after, which can filter out the NULL rows.
+</Note>
+
+### LEFT JOIN with Constant Conditions
+
+<CodeGroup>
+```sql JOIN ON TRUE (Cross Product)
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON 1=1 
+ORDER BY i, k;
+-- Returns cross product of both tables
+```
+
+```sql JOIN ON FALSE
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON 1=2 
+ORDER BY i;
+-- Returns left table with NULL for right columns
+```
+</CodeGroup>
+
+### Complex LEFT JOIN Conditions
+
+```sql
+-- Range join
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON integers.i < integers2.k 
+WHERE integers.i <= 2 
+ORDER BY i;
+
+-- Multiple conditions
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 
+  ON integers.i < integers2.k AND integers.i < integers2.l 
+WHERE integers.i <= 2 
+ORDER BY i;
+
+-- Expression-based join
+SELECT * 
+FROM integers 
+LEFT OUTER JOIN integers2 ON i + l = 21 
+ORDER BY i;
+```
+
+## RIGHT OUTER JOIN
+
+RIGHT OUTER JOIN is equivalent to LEFT OUTER JOIN with tables reversed. DuckDB internally converts RIGHT JOINs to LEFT JOINs.
+
+<CodeGroup>
+```sql RIGHT JOIN
+SELECT integers.*, integers2.* 
+FROM integers2 
+RIGHT OUTER JOIN integers ON integers.i = integers2.k 
+ORDER BY i;
+```
+
+```sql Equivalent LEFT JOIN
+SELECT integers.*, integers2.* 
+FROM integers 
+LEFT OUTER JOIN integers2 ON integers.i = integers2.k 
+ORDER BY i;
+```
+</CodeGroup>
+
+Both return:
+```
+1   2   1      10
+2   3   2      20
+3   4   NULL   NULL
+```
+
+<Tip>
+Practice is to use LEFT JOIN instead of RIGHT JOIN for consistency and readability. Just swap the table order.
+</Tip>
+
+## FULL OUTER JOIN
+
+FULL OUTER JOIN returns all rows from both tables, with NULL values where matches don't exist.
+
+<CodeGroup>
+```sql Basic FULL OUTER JOIN
+CREATE TABLE integers(i INTEGER, j INTEGER);
+INSERT INTO integers VALUES (1, 1), (3, 3);
+
+CREATE TABLE integers2(k INTEGER, l INTEGER);
+INSERT INTO integers2 VALUES (1, 10), (2, 20);
+
+SELECT i, j, k, l 
+FROM integers 
+FULL OUTER JOIN integers2 ON integers.i = integers2.k 
+ORDER BY i;
+```
+
+```sql Result
+-- i       j       k       l
+-- NULL    NULL    2       20
+-- 1       1       1       10
+-- 3       3       NULL    NULL
+```
+</CodeGroup>
+
+### FULL OUTER JOIN with Additional Predicates
+
+```sql
+SELECT i, j, k, l 
+FROM integers 
+FULL OUTER JOIN integers2 
+  ON integers.i = integers2.k AND integers.j > integers2.l 
+ORDER BY i, j, k, l;
+-- Returns rows from both tables as NULL matches
+-- when the additional predicate fails
+```
+
+## CROSS JOIN
+
+CROSS JOIN produces a Cartesian product of both tables.
+
+```sql
+SELECT * 
+FROM (VALUES (1), (2), (3)) AS t1(a)
+CROSS JOIN (VALUES ('x'), ('y')) AS t2(b);
+
+-- Returns:
+-- 1  x
+-- 1  y
+-- 2  x
+-- 2  y
+-- 3  x
+-- 3  y
+```
+
+## Multiple Joins
+
+Chain multiple joins together:
+
+```sql
+SELECT 
+  orders.order_id,
+  customers.name,
+  products.product_name,
+  order_items.quantity
+FROM orders
+INNER JOIN customers ON orders.customer_id = customers.id
+INNER JOIN order_items ON orders.order_id = order_items.order_id
+INNER JOIN products ON order_items.product_id = products.id
+WHERE orders.order_date >= '2024-01-01';
+```
+
+## Self Joins
+
+Join a table to itself:
+
+```sql
+-- Find employees and their managers
+SELECT 
+  e1.empno AS employee,
+  e2.empno AS manager
+FROM empsalary e1
+INNER JOIN empsalary e2 ON e1.manager_id = e2.empno;
+
+-- Find pairs of employees in the same department
+SELECT 
+  e1.empno AS emp1,
+  e2.empno AS emp2,
+  e1.depname
+FROM empsalary e1
+INNER JOIN empsalary e2 
+  ON e1.depname = e2.depname AND e1.empno < e2.empno;
+```
+
+## Join Performance
+
+DuckDB automatically selects the best join algorithm:
+
+- **Hash Join**: Default for equality conditions, very fast
+- **Merge Join**: For sorted data
+- **Nested Loop Join**: For small tables or complex conditions
+- **Index Join**: When indexes are available
+
+### Join Optimization Tips
+
+<Tip>
+1. Put the larger table on the left for LEFT JOINs
+2. Use specific columns in SELECT instead of SELECT *
+3. Add WHERE filters to reduce data before joining
+4. Use EXPLAIN to see the chosen join algorithm
+</Tip>
+
+### Using EXPLAIN
+
+```sql
+EXPLAIN 
+SELECT a, test.b, c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b;
+```
+
+## Advanced Join Patterns
+
+### Anti-Join (Excluding Matches)
+
+```sql
+-- Find rows in left table with no match in right
+SELECT * 
+FROM integers 
+LEFT JOIN integers2 ON integers.i = integers2.k 
+WHERE integers2.k IS NULL;
+
+-- Alternative: NOT IN
+SELECT * 
+FROM integers 
+WHERE i NOT IN (SELECT k FROM integers2);
+
+-- Alternative: NOT EXISTS
+SELECT * 
+FROM integers i
+WHERE NOT EXISTS (
+  SELECT 1 FROM integers2 WHERE k = i.i
+);
+```
+
+### Semi-Join (Checking Existence)
+
+```sql
+-- Rows from left where match exists in right
+SELECT DISTINCT integers.* 
+FROM integers 
+INNER JOIN integers2 ON integers.i = integers2.k;
+
+-- Alternative: IN
+SELECT * 
+FROM integers 
+WHERE i IN (SELECT k FROM integers2);
+
+-- Alternative: EXISTS (usually fastest)
+SELECT * 
+FROM integers i
+WHERE EXISTS (
+  SELECT 1 FROM integers2 WHERE k = i.i
+);
+```
+
+## Complete Example
+
+```sql
+-- Create sample data
+CREATE TABLE customers (
+  customer_id INTEGER,
+  name VARCHAR,
+  country VARCHAR
+);
+
+CREATE TABLE orders (
+  order_id INTEGER,
+  customer_id INTEGER,
+  order_date DATE,
+  amount DECIMAL(10,2)
+);
+
+CREATE TABLE products (
+  product_id INTEGER,
+  product_name VARCHAR,
+  category VARCHAR
+);
+
+CREATE TABLE order_items (
+  order_id INTEGER,
+  product_id INTEGER,
+  quantity INTEGER
+);
+
+-- Complex query with multiple joins
+WITH customer_totals AS (
+  SELECT 
+    c.customer_id,
+    c.name,
+    c.country,
+    COUNT(DISTINCT o.order_id) AS order_count,
+    SUM(o.amount) AS total_spent
+  FROM customers c
+  LEFT JOIN orders o ON c.customer_id = o.customer_id
+  GROUP BY c.customer_id, c.name, c.country
+)
+SELECT 
+  ct.name,
+  ct.country,
+  ct.order_count,
+  ct.total_spent,
+  p.category,
+  SUM(oi.quantity) AS items_purchased
+FROM customer_totals ct
+LEFT JOIN orders o ON ct.customer_id = o.customer_id
+LEFT JOIN order_items oi ON o.order_id = oi.order_id
+LEFT JOIN products p ON oi.product_id = p.product_id
+WHERE ct.total_spent > 1000
+GROUP BY ct.name, ct.country, ct.order_count, ct.total_spent, p.category
+ORDER BY ct.total_spent DESC;
+```

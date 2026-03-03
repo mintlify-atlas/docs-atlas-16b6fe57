@@ -1,0 +1,287 @@
+---
+title: Loading Extensions
+description: Installing and loading DuckDB extensions at runtime
+---
+
+## Extension Loading Commands
+
+DuckDB provides two primary commands for working with extensions at runtime:
+
+- `INSTALL extension_name` - Downloads and installs an extension
+- `LOAD extension_name` - Loads an installed extension into the current session
+
+## Installing Extensions
+
+### Basic Installation
+
+To install an extension from the DuckDB extension repository:
+
+```sql
+INSTALL parquet;
+INSTALL json;
+INSTALL icu;
+```
+
+This downloads the extension binary for your platform and stores it locally.
+
+### Force Reinstall
+
+If you need to reinstall an extension (e.g., after corruption or to get a newer version):
+
+```sql
+FORCE INSTALL extension_name;
+```
+
+<Note>
+Use `FORCE INSTALL` if you encounter errors about corrupted or mismatched extension files.
+</Note>
+
+## Loading Extensions
+
+After installing an extension, you need to load it to use its functionality:
+
+```sql
+LOAD parquet;
+LOAD json;
+```
+
+### Install and Load Pattern
+
+A common pattern is to install and load together:
+
+```sql
+INSTALL sqlite_scanner;
+LOAD sqlite_scanner;
+
+-- Now you can use the extension
+SELECT * FROM sqlite_scan('database.db', 'table_name');
+```
+
+## Autoloading Extensions
+
+DuckDB can automatically load certain known extensions when they're needed.
+
+### Autoinstall Known Extensions
+
+To enable automatic installation of known extensions:
+
+```sql
+SET autoinstall_known_extensions = true;
+SET autoload_known_extensions = true;
+```
+
+With these settings enabled, DuckDB will automatically install and load extensions when you use features that require them:
+
+```sql
+-- This will auto-install and load the parquet extension if needed
+SELECT * FROM 'data.parquet';
+
+-- This will auto-install and load the json extension if needed
+SELECT * FROM 'data.json';
+```
+
+<Warning>
+Autoinstall is disabled by default for security reasons. Only enable it if you trust the DuckDB extension repository.
+</Warning>
+
+## Extension Repository
+
+### Default Repository
+
+Extensions are served from URLs following this pattern:
+
+```
+http://extensions.duckdb.org/v0.8.1/windows_arm64/name.duckdb_extension.gz
+```
+
+The URL components are:
+- **Repository**: `http://extensions.duckdb.org/`
+- **Version**: `v0.8.1` (DuckDB version identifier)
+- **Platform**: `windows_arm64` (your platform)
+- **Extension name**: `name`
+- **File extension**: `.duckdb_extension.gz` (gzipped extension binary)
+
+### Custom Repository
+
+You can configure a custom extension repository:
+
+```sql
+SET custom_extension_repository = 'http://some.url.org/subfolder1/subfolder2/';
+```
+
+This is useful for:
+- Hosting internal/proprietary extensions
+- Using a local mirror for air-gapped environments
+- Testing extensions in development
+
+### Autoinstall Repository
+
+For autoinstall operations, you can set a separate repository:
+
+```sql
+SET autoinstall_extension_repository = 'http://your-repo.com/extensions/';
+```
+
+## Local Extension Storage
+
+Installed extensions are stored locally at:
+
+```
+~/.duckdb/extensions/v0.8.1/osx_arm64/name.duckdb_extension
+```
+
+Path components:
+- **Config folder**: `~/.duckdb/`
+- **Extensions subfolder**: `extensions/`
+- **Version**: `v0.8.1`
+- **Platform**: `osx_arm64`
+- **Extension file**: `name.duckdb_extension`
+
+### Custom Home Directory
+
+You can override the configuration folder location:
+
+```sql
+SET home_directory = '/some/folder';
+```
+
+## Loading from Custom Paths
+
+You can load an extension from an explicit file path:
+
+```sql
+LOAD '/path/to/my_extension.duckdb_extension';
+```
+
+This is useful for:
+- Loading locally built extensions
+- Using extensions not in the repository
+- Testing development versions
+
+## Extension Status
+
+Check which extensions are installed and loaded:
+
+```sql
+SELECT 
+    extension_name,
+    loaded,
+    installed,
+    install_mode
+FROM duckdb_extensions()
+ORDER BY extension_name;
+```
+
+### Install Modes
+
+Extensions can have different install modes:
+- **STATICALLY_LINKED** - Compiled into the DuckDB binary
+- **NOT_INSTALLED** - Available but not installed
+- **INSTALLED** - Downloaded and available locally
+
+## Common Workflows
+
+### First Time Setup
+
+<Steps>
+  <Step title="Install the extension">
+    ```sql
+    INSTALL postgres_scanner;
+    ```
+    Downloads the extension binary to your local extensions folder.
+  </Step>
+  
+  <Step title="Load the extension">
+    ```sql
+    LOAD postgres_scanner;
+    ```
+    Loads the extension into your current DuckDB session.
+  </Step>
+  
+  <Step title="Use the extension">
+    ```sql
+    SELECT * FROM postgres_scan('host=localhost', 'public', 'users');
+    ```
+    The extension's functions are now available.
+  </Step>
+</Steps>
+
+### Enable Autoloading
+
+<Steps>
+  <Step title="Set configuration">
+    ```sql
+    SET autoinstall_known_extensions = true;
+    SET autoload_known_extensions = true;
+    ```
+  </Step>
+  
+  <Step title="Use extension features directly">
+    ```sql
+    -- DuckDB will auto-install and load the extension
+    SELECT * FROM 'data.parquet';
+    ```
+  </Step>
+</Steps>
+
+### Using a Custom Repository
+
+<Steps>
+  <Step title="Configure repository">
+    ```sql
+    SET custom_extension_repository = 'http://internal-repo.company.com/duckdb/';
+    ```
+  </Step>
+  
+  <Step title="Install from custom repository">
+    ```sql
+    INSTALL my_custom_extension;
+    ```
+  </Step>
+  
+  <Step title="Load and use">
+    ```sql
+    LOAD my_custom_extension;
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Extension Not Found
+
+If you get an error that an extension is not found:
+
+1. Check if the extension exists for your platform
+2. Verify your DuckDB version is compatible
+3. Try reinstalling: `FORCE INSTALL extension_name;`
+
+### Signature Verification Failed
+
+If signature verification fails:
+
+```sql
+FORCE INSTALL extension_name;
+```
+
+Or manually remove the corrupted file from `~/.duckdb/extensions/`
+
+### Autoload Not Working
+
+Ensure both settings are enabled:
+
+```sql
+SET autoinstall_known_extensions = true;
+SET autoload_known_extensions = true;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Extensions" icon="cube" href="/extensions/core-extensions">
+    Learn about the extensions available in DuckDB
+  </Card>
+  <Card title="Building Extensions" icon="hammer" href="/extensions/building">
+    Build your own custom extensions
+  </Card>
+</CardGroup>

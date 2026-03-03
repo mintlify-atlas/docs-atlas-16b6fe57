@@ -1,0 +1,451 @@
+---
+title: Running Tests
+description: Run DuckDB tests, including unit tests, SQL logic tests, and benchmarks
+---
+
+DuckDB has a comprehensive test suite covering unit tests, SQL logic tests, and benchmarks. This guide explains how to run and write tests.
+
+## Test Types
+
+DuckDB uses two main types of tests:
+
+1. **SQL Logic Tests** (`.test` files) - Preferred method for most testing
+2. **C++ Unit Tests** - For testing concurrent connections or low-level behavior
+
+<Note>
+Strongly prefer SQL logic tests over C++ tests. Only write C++ tests when absolutely necessary (e.g., testing concurrent connections or exotic behavior).
+</Note>
+
+## Running Tests
+
+### Quick Unit Tests
+
+Run fast unit tests (~1 minute):
+
+```bash
+make unit
+```
+
+This is equivalent to:
+
+```bash
+make debug
+build/debug/test/unittest
+```
+
+### All Unit Tests
+
+Run the complete test suite (~1 hour):
+
+```bash
+make allunit
+```
+
+This runs all tests including slower tests marked with `.test_slow` or `[.]` tags.
+
+<Warning>
+Always run `make allunit` before submitting a pull request to ensure all tests pass.
+</Warning>
+
+### Release Build Tests
+
+For performance testing, run tests with the release build:
+
+```bash
+make unittest_release
+```
+
+## Test Structure
+
+### Fast vs. Slow Tests
+
+**Fast tests** run by default with `make unit`:
+- Should complete in ~1 minute total
+- Cover common code paths
+- Test typical usage patterns
+
+**Slow tests** only run with `make allunit`:
+- Comprehensive edge case testing
+- Large dataset tests
+- Performance regression tests
+
+#### Marking Tests as Slow
+
+**SQL logic tests:** Use `.test_slow` extension:
+```
+test/sql/my_comprehensive_test.test_slow
+```
+
+**C++ tests:** Add `[.]` tag:
+```cpp
+TEST_CASE("Comprehensive test", "[.]")
+```
+
+### Test File Locations
+
+Tests are organized under `test/`:
+
+```
+test/
+├── sql/              # SQL logic tests
+│   ├── aggregate/
+│   ├── join/
+│   ├── types/
+│   └── ...
+├── api/              # API tests (C++)
+├── common/           # Common utilities tests
+├── optimizer/        # Optimizer tests
+└── fuzzer/           # Fuzzing tests
+```
+
+## SQL Logic Tests
+
+SQL logic tests use a simple format for declarative testing.
+
+### Basic Test Format
+
+```sql
+# test/sql/example.test
+
+statement ok
+CREATE TABLE integers(i INTEGER);
+
+statement ok
+INSERT INTO integers VALUES (1), (2), (3);
+
+query I
+SELECT * FROM integers ORDER BY i;
+----
+1
+2
+3
+```
+
+### Query Types
+
+Specify expected column types:
+- `I` - Integer
+- `T` - Text/VARCHAR
+- `R` - Real/Float
+- `?` - Any type
+
+Example:
+```sql
+query IT
+SELECT id, name FROM users;
+----
+1    Alice
+2    Bob
+```
+
+### Error Testing
+
+Test that a statement produces an error:
+
+```sql
+statement error
+SELECT * FROM nonexistent_table;
+```
+
+Test for specific error message:
+
+```sql
+statement error Table with name nonexistent_table does not exist
+SELECT * FROM nonexistent_table;
+```
+
+### Environment Variables
+
+Tests have access to these environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `TEST_NAME` | Full test file path | `test/sql/types/integer.test` |
+| `TEST_NAME_NO_SLASH` | Path with `/` replaced by `_` | `test_sql_types_integer.test` |
+| `TEST_UUID` | Unique UUID per test run | Random UUID string |
+| `WORKING_DIR` | DuckDB source directory | `/home/user/duckdb` |
+| `BUILD_DIR` | Build output directory | `{WORKING_DIR}/build/release` |
+| `DATA_DIR` | Test data directory | `{WORKING_DIR}/data` |
+| `TEMP_DIR` | Temporary directory for test | `{WORKING_DIR}/duckdb_unittest_tempdir/<pid>` |
+
+## C++ Unit Tests
+
+For cases where SQL logic tests aren't sufficient.
+
+### Writing C++ Tests
+
+```cpp
+#include "catch.hpp"
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+TEST_CASE("Test concurrent connections", "[api]") {
+    DuckDB db(nullptr);
+    Connection con1(db);
+    Connection con2(db);
+    
+    // Test concurrent access
+    con1.Query("CREATE TABLE test(i INTEGER)");
+    con2.Query("INSERT INTO test VALUES (42)");
+    
+    auto result = con1.Query("SELECT * FROM test");
+    REQUIRE(result->success);
+}
+```
+
+### Test Tags
+
+Organize tests with tags:
+```cpp
+TEST_CASE("Fast test", "[api][fast]") { }
+TEST_CASE("Slow test", "[api][.]") { }  // [.] marks as slow
+```
+
+## Running Specific Tests
+
+### Run Single Test File
+
+```bash
+build/debug/test/unittest test/sql/aggregate/sum.test
+```
+
+### Run Tests Matching Pattern
+
+```bash
+build/debug/test/unittest "[aggregate]"
+```
+
+### Run Specific SQL Test
+
+```bash
+build/debug/test/unittest "test/sql/types/integer.test"
+```
+
+### Run One Test at a Time
+
+For debugging flaky tests:
+
+```bash
+python3 scripts/run_tests_one_by_one.py build/debug/test/unittest --time_execution
+```
+
+## Benchmarks
+
+### Building with Benchmarks
+
+<Steps>
+
+<Step title="Build with benchmark support">
+
+```bash
+BUILD_BENCHMARK=1 BUILD_TPCH=1 make
+```
+
+</Step>
+
+<Step title="List available benchmarks">
+
+```bash
+build/release/benchmark/benchmark_runner --list
+```
+
+</Step>
+
+<Step title="Run a specific benchmark">
+
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark
+```
+
+</Step>
+
+</Steps>
+
+### Benchmark Output
+
+Benchmarks run 5 times by default and output CSV:
+
+```
+name	run	timing
+benchmark/micro/nulls/no_nulls_addition.benchmark	1	0.121234
+benchmark/micro/nulls/no_nulls_addition.benchmark	2	0.121702
+benchmark/micro/nulls/no_nulls_addition.benchmark	3	0.122948
+benchmark/micro/nulls/no_nulls_addition.benchmark	4	0.122534
+benchmark/micro/nulls/no_nulls_addition.benchmark	5	0.124102
+```
+
+### Benchmark Options
+
+**Save to file:**
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark --out=timings.out
+```
+
+**Run matching pattern:**
+```bash
+build/release/benchmark/benchmark_runner "benchmark/micro/nulls/.*"
+```
+
+**Show benchmark info:**
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark --info
+```
+
+Output:
+```
+display_name: NULL Addition (no nulls)
+group: micro
+subgroup: nulls
+```
+
+**Show query:**
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark --query
+```
+
+**Profile execution:**
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark --profile
+```
+
+## Testing Best Practices
+
+### Write Comprehensive Tests
+
+<Steps>
+
+<Step title="Test different types">
+
+Test with various data types:
+```sql
+# Test with integers
+query I
+SELECT 1 + 2;
+----
+3
+
+# Test with decimals
+query R
+SELECT 1.5 + 2.5;
+----
+4.0
+
+# Test with strings
+query T
+SELECT 'hello' || ' ' || 'world';
+----
+hello world
+```
+
+</Step>
+
+<Step title="Test edge cases">
+
+```sql
+# Test NULL handling
+query I
+SELECT 1 + NULL;
+----
+NULL
+
+# Test empty results
+query I
+SELECT * FROM integers WHERE false;
+----
+
+# Test large values
+query I
+SELECT 9223372036854775807;
+----
+9223372036854775807
+```
+
+</Step>
+
+<Step title="Test error conditions">
+
+```sql
+# Test division by zero
+statement error Division by zero
+SELECT 1 / 0;
+
+# Test type mismatches
+statement error Cannot compare INTEGER and VARCHAR
+SELECT 1 = 'hello';
+```
+
+</Step>
+
+</Steps>
+
+### Code Coverage
+
+- Look at code coverage reports for your branch
+- Attempt to cover all code paths in fast unit tests
+- Trigger exceptions where possible
+- Some exceptions don't need coverage (e.g., out of memory, type switch defaults)
+
+<Note>
+Large uncovered branches should either be covered by tests or removed.
+</Note>
+
+## Continuous Integration
+
+### Running CI on Your Fork
+
+Before opening a PR, run CI on your fork:
+
+<Steps>
+
+<Step title="Enable GitHub Actions on your fork">
+
+Go to Settings → Actions → General → Enable Actions
+
+</Step>
+
+<Step title="Fetch and push tags">
+
+```bash
+git fetch upstream --tags  # assuming upstream = duckdb/duckdb
+git push origin --tags
+```
+
+</Step>
+
+<Step title="Push your branch">
+
+```bash
+git push origin your-branch-name
+```
+
+CI will run automatically on push.
+
+</Step>
+
+</Steps>
+
+### Understanding CI Failures
+
+1. **Check if it's related to your changes** - Look at the failing test
+2. **Merge with main frequently** - Run `make format-fix` and `generate-files` if needed
+3. **Check other PRs** - If multiple PRs fail the same test, it may be a CI issue
+
+### Nightly CI
+
+Long-running tests run nightly. You can manually trigger them on your fork:
+
+1. Go to Actions tab on your fork
+2. Select "Nightly Tests" workflow
+3. Click "Run workflow"
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/development/architecture">
+    Understand DuckDB's codebase structure
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/development/contributing">
+    Learn the contribution workflow
+  </Card>
+</CardGroup>

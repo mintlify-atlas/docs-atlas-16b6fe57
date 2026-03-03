@@ -1,0 +1,436 @@
+---
+title: Built-in Functions
+description: Overview of DuckDB's built-in functions including aggregates, scalar, and table functions
+---
+
+DuckDB provides a comprehensive set of built-in functions for data manipulation, aggregation, and analysis. Functions are organized into categories based on their purpose and return type.
+
+## Function Categories
+
+DuckDB functions fall into three main categories:
+
+- **Aggregate Functions**: Compute a single result from a set of input values
+- **Scalar Functions**: Return a single value for each input row
+- **Table Functions**: Return a table (set of rows) as output
+
+## Aggregate Functions
+
+Aggregate functions operate on a set of values and return a single result.
+
+### Common Aggregates
+
+<CodeGroup>
+```sql COUNT
+-- Count all rows
+SELECT COUNT(*) FROM test;
+
+-- Count non-NULL values
+SELECT COUNT(i) FROM integers;
+
+-- Count distinct values
+SELECT COUNT(DISTINCT depname) FROM empsalary;
+```
+
+```sql SUM
+SELECT 
+  SUM(salary) AS total_salary,
+  SUM(a + b) AS computed_sum
+FROM test;
+```
+
+```sql AVG
+SELECT 
+  AVG(salary) AS avg_salary,
+  AVG(i) AS avg_i
+FROM empsalary;
+```
+
+```sql MIN/MAX
+SELECT 
+  MIN(salary) AS min_salary,
+  MAX(salary) AS max_salary
+FROM empsalary;
+```
+</CodeGroup>
+
+### Statistical Aggregates
+
+```sql
+SELECT 
+  STDDEV(salary) AS std_dev,
+  VARIANCE(salary) AS variance,
+  MEDIAN(salary) AS median,
+  MODE(salary) AS mode
+FROM empsalary;
+```
+
+### String Aggregates
+
+```sql
+-- Concatenate strings
+SELECT STRING_AGG(name, ', ') AS all_names
+FROM employees;
+
+-- With ordering
+SELECT STRING_AGG(name, ', ' ORDER BY name) AS sorted_names
+FROM employees;
+```
+
+### Boolean Aggregates
+
+```sql
+SELECT 
+  BOOL_AND(salary > 3000) AS all_above_3000,
+  BOOL_OR(salary > 6000) AS any_above_6000
+FROM empsalary;
+```
+
+### Advanced Aggregates
+
+<CodeGroup>
+```sql FIRST/LAST
+SELECT 
+  FIRST(empno ORDER BY salary) AS lowest_paid_empno,
+  LAST(empno ORDER BY salary) AS highest_paid_empno
+FROM empsalary;
+```
+
+```sql ARG_MIN/ARG_MAX
+-- Find value of one column at min/max of another
+SELECT 
+  ARG_MIN(empno, salary) AS empno_with_min_salary,
+  ARG_MAX(empno, salary) AS empno_with_max_salary
+FROM empsalary;
+```
+
+```sql HISTOGRAM
+SELECT HISTOGRAM(depname) AS dept_counts
+FROM empsalary;
+```
+</CodeGroup>
+
+<Note>
+Aggregate functions ignore NULL values except for COUNT(*).
+</Note>
+
+## Scalar Functions
+
+Scalar functions operate on individual values and return one result per input.
+
+### String Functions
+
+<CodeGroup>
+```sql Concatenation
+SELECT 
+  s || ' ' || s AS concat,
+  CONCAT(s, ' ', '🦆') AS concat_func
+FROM strings;
+```
+
+```sql Case Conversion
+SELECT 
+  UPPER(name) AS uppercase,
+  LOWER(name) AS lowercase,
+  INITCAP(name) AS titlecase
+FROM users;
+```
+
+```sql Substring
+SELECT 
+  SUBSTRING(name, 1, 3) AS first_three,
+  LEFT(name, 3) AS left_three,
+  RIGHT(name, 3) AS right_three
+FROM users;
+```
+
+```sql Trimming
+SELECT 
+  TRIM(name) AS trimmed,
+  LTRIM(name) AS left_trimmed,
+  RTRIM(name) AS right_trimmed
+FROM users;
+```
+</CodeGroup>
+
+### Numeric Functions
+
+<CodeGroup>
+```sql Basic Math
+SELECT 
+  ABS(-42) AS absolute,
+  ROUND(3.14159, 2) AS rounded,
+  CEIL(3.14) AS ceiling,
+  FLOOR(3.14) AS floor;
+```
+
+```sql Arithmetic
+SELECT 
+  a + b AS sum,
+  a - b AS difference,
+  a * b AS product,
+  a / b AS division,
+  a % b AS modulo,
+  a ^ 2 AS squared
+FROM test;
+```
+
+```sql Advanced Math
+SELECT 
+  SQRT(16) AS square_root,
+  POWER(2, 10) AS power,
+  EXP(1) AS e,
+  LN(10) AS natural_log,
+  LOG10(100) AS log_base_10;
+```
+</CodeGroup>
+
+### Date and Time Functions
+
+<CodeGroup>
+```sql Current Date/Time
+SELECT 
+  CURRENT_DATE AS today,
+  CURRENT_TIME AS now_time,
+  CURRENT_TIMESTAMP AS now;
+```
+
+```sql Date Parts
+SELECT 
+  EXTRACT(YEAR FROM enroll_date) AS year,
+  EXTRACT(MONTH FROM enroll_date) AS month,
+  EXTRACT(DAY FROM enroll_date) AS day
+FROM empsalary;
+```
+
+```sql Date Arithmetic
+SELECT 
+  enroll_date + INTERVAL '1 year' AS next_year,
+  enroll_date - INTERVAL '30 days' AS thirty_days_ago,
+  AGE(CURRENT_DATE, enroll_date) AS time_since_enrollment
+FROM empsalary;
+```
+
+```sql Date Truncation
+SELECT 
+  DATE_TRUNC('month', enroll_date) AS month_start,
+  DATE_TRUNC('year', enroll_date) AS year_start
+FROM empsalary;
+```
+</CodeGroup>
+
+### Type Conversion Functions
+
+```sql
+SELECT 
+  CAST(salary AS VARCHAR) AS salary_string,
+  TRY_CAST('123' AS INTEGER) AS parsed_int,
+  salary::DECIMAL(10,2) AS decimal_salary
+FROM empsalary;
+```
+
+### Conditional Functions
+
+<CodeGroup>
+```sql COALESCE
+-- Return first non-NULL value
+SELECT 
+  COALESCE(i, 0) AS value_or_zero
+FROM integers;
+```
+
+```sql NULLIF
+-- Return NULL if values are equal
+SELECT 
+  NULLIF(a, 0) AS avoid_division_by_zero
+FROM test;
+```
+
+```sql GREATEST/LEAST
+SELECT 
+  GREATEST(a, b, c) AS maximum,
+  LEAST(a, b, c) AS minimum
+FROM test;
+```
+</CodeGroup>
+
+## Table Functions
+
+Table functions return a table (set of rows) and are used in the FROM clause.
+
+### Range Function
+
+Generate sequences of numbers:
+
+<CodeGroup>
+```sql Simple Range
+SELECT * FROM range(5);
+-- Returns: 0, 1, 2, 3, 4
+```
+
+```sql Range with Start/Stop
+SELECT * FROM range(10, 20);
+-- Returns: 10, 11, ..., 19
+```
+
+```sql Range with Step
+SELECT * FROM range(0, 100, 10);
+-- Returns: 0, 10, 20, ..., 90
+```
+</CodeGroup>
+
+### Generate Series
+
+Generate series with dates or timestamps:
+
+```sql
+-- Date series
+SELECT * FROM generate_series(
+  DATE '2024-01-01',
+  DATE '2024-12-31',
+  INTERVAL '1 month'
+);
+
+-- Timestamp series
+SELECT * FROM generate_series(
+  TIMESTAMP '2024-01-01 00:00:00',
+  TIMESTAMP '2024-01-01 23:59:59',
+  INTERVAL '1 hour'
+);
+```
+
+### Read Functions
+
+<CodeGroup>
+```sql read_csv
+SELECT * FROM read_csv('data.csv');
+
+SELECT * FROM read_csv(
+  'data.csv',
+  delim = '|',
+  header = TRUE
+);
+```
+
+```sql read_parquet
+SELECT * FROM read_parquet('data.parquet');
+
+SELECT * FROM read_parquet(['file1.parquet', 'file2.parquet']);
+```
+
+```sql read_json
+SELECT * FROM read_json('data.json');
+```
+</CodeGroup>
+
+### Unnest Function
+
+Expand arrays into rows:
+
+```sql
+SELECT UNNEST([1, 2, 3, 4, 5]) AS value;
+
+SELECT 
+  id,
+  UNNEST(tags) AS tag
+FROM articles;
+```
+
+## Array and List Functions
+
+```sql
+SELECT 
+  LIST_VALUE(1, 2, 3, 4, 5) AS list,
+  [1, 2, 3] AS array_literal,
+  LIST_CONTAINS([1, 2, 3], 2) AS contains,
+  LIST_LENGTH([1, 2, 3]) AS length,
+  LIST_SORT([3, 1, 2]) AS sorted;
+```
+
+## Struct Functions
+
+```sql
+SELECT 
+  {'name': 'Alice', 'age': 30} AS person,
+  STRUCT_PACK(name := 'Alice', age := 30) AS person_struct,
+  ROW('Alice', 30) AS person_row;
+```
+
+## Pattern Matching Functions
+
+<CodeGroup>
+```sql LIKE
+SELECT * FROM users 
+WHERE name LIKE 'A%';
+
+SELECT * FROM users 
+WHERE email ILIKE '%@GMAIL.COM';
+```
+
+```sql Regular Expressions
+SELECT 
+  REGEXP_MATCHES(text, '\\d+') AS has_digits,
+  REGEXP_EXTRACT(text, '\\d+') AS first_number,
+  REGEXP_REPLACE(text, '\\d+', 'X') AS replaced
+FROM documents;
+```
+</CodeGroup>
+
+## Utility Functions
+
+```sql
+-- Generate UUIDs
+SELECT UUID() AS unique_id;
+
+-- Hash functions
+SELECT 
+  MD5(name) AS md5_hash,
+  SHA256(name) AS sha256_hash
+FROM users;
+
+-- Type checking
+SELECT 
+  TYPEOF(42) AS int_type,
+  TYPEOF('hello') AS string_type;
+```
+
+<Tip>
+Use `DESCRIBE SELECT ...` to see the schema and types of a query result, including function return types.
+</Tip>
+
+## Function Examples
+
+### Combining Multiple Functions
+
+```sql
+WITH processed_data AS (
+  SELECT 
+    empno,
+    UPPER(TRIM(depname)) AS clean_dept,
+    ROUND(salary * 1.1, 2) AS raised_salary,
+    DATE_TRUNC('year', enroll_date) AS enroll_year,
+    COALESCE(bonus, 0) AS bonus_amount
+  FROM empsalary
+)
+SELECT 
+  clean_dept,
+  COUNT(*) AS emp_count,
+  AVG(raised_salary) AS avg_new_salary,
+  SUM(bonus_amount) AS total_bonuses
+FROM processed_data
+GROUP BY clean_dept, enroll_year
+ORDER BY clean_dept;
+```
+
+### Working with NULLs
+
+```sql
+SELECT 
+  empno,
+  -- Replace NULL with default
+  COALESCE(bonus, 0) AS bonus,
+  -- NULL if condition met
+  NULLIF(salary, 0) AS safe_salary,
+  -- Check for NULL
+  CASE WHEN bonus IS NULL THEN 'No bonus' ELSE 'Has bonus' END AS bonus_status
+FROM empsalary;
+```

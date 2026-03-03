@@ -1,0 +1,343 @@
+---
+title: Building Extensions
+description: How to build DuckDB extensions from source
+---
+
+## Overview
+
+All DuckDB extensions, whether in-tree or out-of-tree, are built using the same underlying mechanism:
+
+1. DuckDB's root `CMakeLists.txt` serves as the root CMake file
+2. Extensions to build are passed as parameters
+3. Each extension can be configured for different build modes (loadable binary, statically linked, etc.)
+
+## Build Methods
+
+There are several ways to specify which extensions to build when compiling DuckDB.
+
+### Using Makefile Variables
+
+The simplest method uses the `DUCKDB_EXTENSIONS` variable with a semicolon-separated list:
+
+```bash
+DUCKDB_EXTENSIONS='json;icu' make
+```
+
+### Using CMake Directly
+
+You can also pass extensions directly to CMake:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_EXTENSIONS='parquet;icu;tpch;tpcds;fts;json'
+make
+```
+
+### Using Build Variables
+
+For convenience, you can use individual build variables:
+
+```bash
+BUILD_JSON=1 make
+BUILD_ICU=1 BUILD_PARQUET=1 make
+```
+
+These variables are defined in the root `Makefile` and are syntactic sugar around the `DUCKDB_EXTENSIONS` variable.
+
+## Extension Configuration Files
+
+For more control over how extensions are built, use extension configuration files. These are CMake files that control extension loading.
+
+### Configuration File Locations
+
+DuckDB searches for configuration files in this order (later files override earlier ones):
+
+<Steps>
+  <Step title="Base configuration">
+    **`extension/extension_config.cmake`**
+    
+    Extensions specified here are built every time DuckDB is built. This configuration is always loaded.
+  </Step>
+  
+  <Step title="Client-specific configuration (optional)">
+    **`tools/*/duckdb_extension_config.cmake`**
+    
+    Specifies which extensions are built and linked into each client (CLI, Python, etc.).
+  </Step>
+  
+  <Step title="Local configuration (optional)">
+    **`extension/extension_config_local.cmake`**
+    
+    Your personal configuration for custom/dev builds. This file is gitignored and should be created by you.
+  </Step>
+  
+  <Step title="Additional configs (optional)">
+    **Passed via `DUCKDB_EXTENSION_CONFIGS`**
+    
+    Additional configuration files can be specified to point to configs anywhere on your machine.
+  </Step>
+</Steps>
+
+### Configuration Priority
+
+DuckDB loads these files in **reverse order**, ignoring subsequent attempts to load an extension with the same name. This allows you to override the base configuration with local settings.
+
+## The `duckdb_extension_load` Function
+
+The `duckdb_extension_load()` function is used in configuration files to specify how extensions should be loaded.
+
+### Automatic Loading
+
+The simplest form automatically locates and loads an extension:
+
+```cmake
+duckdb_extension_load(json)
+```
+
+This searches the `./extension` and `./extension_external` directories for the extension.
+
+### Don't Link Option
+
+To build the loadable extension binary without statically linking it:
+
+```cmake
+duckdb_extension_load(json DONT_LINK)
+```
+
+### Custom Path
+
+Specify a custom location for the extension:
+
+```cmake
+duckdb_extension_load(my_extension
+    SOURCE_DIR /absolute/path/to/extension/root
+    INCLUDE_DIR /absolute/path/to/extension/header
+    DONT_LINK
+)
+```
+
+The `INCLUDE_DIR` parameter is optional.
+
+### Load from GitHub
+
+Directly install and build an extension from a GitHub repository:
+
+```cmake
+duckdb_extension_load(postgres_scanner
+    GIT_URL https://github.com/duckdb/postgres_scanner
+    GIT_TAG cd043b49cdc9e0d3752535b8333c9433e1007a48
+    DONT_LINK
+)
+```
+
+This downloads the extension to the CMake build directory and builds it from there.
+
+### Explicitly Disable Extensions
+
+To override and disable an extension enabled in another config:
+
+```cmake
+duckdb_extension_load(parquet DONT_BUILD)
+```
+
+You can also disable extensions from the Makefile:
+
+```bash
+DUCKDB_EXTENSIONS='tpch;json' SKIP_EXTENSIONS=parquet make
+```
+
+## Example Workflows
+
+### Override Default Extension Configuration
+
+By default, the parquet extension is statically linked because of this line in `extension/extension_config.cmake`:
+
+```cmake
+duckdb_extension_load(parquet)
+```
+
+To build DuckDB with a custom parquet extension that's only a loadable binary (not statically linked):
+
+<Steps>
+  <Step title="Create local configuration">
+    Create `extension/extension_config_local.cmake`:
+    
+    ```cmake
+    duckdb_extension_load(parquet
+        DONT_LINK
+        SOURCE_DIR /path/to/my/custom/parquet
+    )
+    ```
+  </Step>
+  
+  <Step title="Build DuckDB">
+    ```bash
+    make
+    ```
+    
+    CMake will output:
+    ```
+    -- Building extension 'parquet' from '/path/to/my/custom/parquet'
+    -- Extensions built but not linked: parquet
+    ```
+  </Step>
+</Steps>
+
+### Build Multiple Extensions
+
+<Steps>
+  <Step title="Set extensions to build">
+    ```bash
+    cmake -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_EXTENSIONS='parquet;json;icu;httpfs'
+    ```
+  </Step>
+  
+  <Step title="Compile">
+    ```bash
+    make -j4
+    ```
+  </Step>
+  
+  <Step title="Find built extensions">
+    Loadable extensions will be in the build directory:
+    ```bash
+    ls build/release/extension/*/*.duckdb_extension
+    ```
+  </Step>
+</Steps>
+
+### Build Out-of-Tree Extension
+
+To build an out-of-tree extension based on the [extension-template](https://github.com/duckdb/extension-template):
+
+<Steps>
+  <Step title="Place extension in extension_external">
+    Clone or copy the extension to `extension_external/`:
+    
+    ```bash
+    cd duckdb
+    mkdir -p extension_external
+    git clone https://github.com/yourname/your_extension extension_external/your_extension
+    ```
+  </Step>
+  
+  <Step title="Configure build">
+    Create `extension/extension_config_local.cmake`:
+    
+    ```cmake
+    duckdb_extension_load(your_extension)
+    ```
+  </Step>
+  
+  <Step title="Build">
+    ```bash
+    make
+    ```
+    
+    Extensions in `extension_external/` are automatically discovered when using automatic loading.
+  </Step>
+</Steps>
+
+### Build Extension from GitHub
+
+<Steps>
+  <Step title="Configure to load from GitHub">
+    Create `extension/extension_config_local.cmake`:
+    
+    ```cmake
+    duckdb_extension_load(spatial
+        GIT_URL https://github.com/duckdb/duckdb_spatial
+        GIT_TAG main
+    )
+    ```
+  </Step>
+  
+  <Step title="Build DuckDB">
+    ```bash
+    make
+    ```
+    
+    The extension will be downloaded and built automatically.
+  </Step>
+</Steps>
+
+## VCPKG Dependency Management
+
+DuckDB extensions can use [VCPKG](https://vcpkg.io/en/) to manage their dependencies. See the [Extension Template](https://github.com/duckdb/extension-template) for setup examples.
+
+### Building Multiple Extensions with VCPKG
+
+When building DuckDB with multiple extensions that use VCPKG, you need to merge their dependency manifests:
+
+<Steps>
+  <Step title="Configure extensions">
+    Add extensions to `extension/extension_config_local.cmake`:
+    
+    ```cmake
+    duckdb_extension_load(extension_1
+        GIT_URL https://github.com/example/extension_1
+        GIT_TAG some_git_hash
+    )
+    duckdb_extension_load(extension_2
+        GIT_URL https://github.com/example/extension_2
+        GIT_TAG some_git_hash
+    )
+    ```
+  </Step>
+  
+  <Step title="Merge VCPKG manifests">
+    ```bash
+    make extension_configuration
+    ```
+    
+    This creates a merged manifest in `./build/extension_configuration/vcpkg.json`.
+  </Step>
+  
+  <Step title="Build with merged manifest">
+    ```bash
+    USE_MERGED_VCPKG_MANIFEST=1 \
+      VCPKG_TOOLCHAIN_PATH="/path/to/vcpkg" \
+      make
+    ```
+    
+    This installs all dependencies, builds both extensions, and links them into DuckDB.
+  </Step>
+</Steps>
+
+## Build Output
+
+After building, you'll see output indicating which extensions were built:
+
+```
+-- Building extension 'tpch' from '/Users/sam/Development/duckdb/extension'
+-- Building extension 'json' from '/Users/sam/Development/duckdb/extension'
+-- Extensions linked into DuckDB: tpch, json
+-- Extensions built but not linked: parquet
+```
+
+## Testing Your Extension
+
+After building a loadable extension:
+
+```sql
+-- Load from build directory
+LOAD './build/release/extension/my_extension/my_extension.duckdb_extension';
+
+-- Verify it loaded
+SELECT * FROM duckdb_extensions() WHERE extension_name = 'my_extension';
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Extension Template" icon="github" href="https://github.com/duckdb/extension-template">
+    Start building your own extension using the official template
+  </Card>
+  <Card title="Core Extensions" icon="cube" href="/extensions/core-extensions">
+    Study the source code of built-in extensions
+  </Card>
+  <Card title="Loading Extensions" icon="download" href="/extensions/loading">
+    Learn how to load your built extension
+  </Card>
+</CardGroup>

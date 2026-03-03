@@ -1,0 +1,469 @@
+---
+title: Performance Benchmarks
+description: Running and understanding DuckDB performance benchmarks including TPC-H and TPC-DS
+---
+
+DuckDB includes a comprehensive benchmarking suite for measuring and validating performance across various workloads.
+
+## Running Benchmarks
+
+### Building the Benchmark Runner
+
+From `README.md:45` and `benchmark/README.md:2`:
+
+```bash
+git clone https://github.com/duckdb/duckdb
+cd duckdb
+BUILD_BENCHMARK=1 BUILD_TPCH=1 make
+```
+
+This builds:
+- The benchmark runner executable
+- TPC-H data generator and queries
+- Micro-benchmark suite
+
+### Listing Available Benchmarks
+
+```bash
+build/release/benchmark/benchmark_runner --list
+```
+
+This displays all available benchmarks organized by category:
+- `micro/` - Focused micro-benchmarks for specific operations
+- `tpch/` - TPC-H decision support queries
+- `tpcds/` - TPC-DS decision support queries  
+- `trainbenchmark/` - Graph pattern matching queries
+
+### Running a Single Benchmark
+
+From `benchmark/README.md:14`:
+
+```bash
+build/release/benchmark/benchmark_runner benchmark/micro/nulls/no_nulls_addition.benchmark
+```
+
+Output format:
+
+```
+name	run	timing
+benchmark/micro/nulls/no_nulls_addition.benchmark	1	0.121234
+benchmark/micro/nulls/no_nulls_addition.benchmark	2	0.121702
+benchmark/micro/nulls/no_nulls_addition.benchmark	3	0.122948
+benchmark/micro/nulls/no_nulls_addition.benchmark	4	0.122534
+benchmark/micro/nulls/no_nulls_addition.benchmark	5	0.124102
+```
+
+By default, each benchmark runs 5 iterations.
+
+### Using Regex Patterns
+
+Run multiple related benchmarks:
+
+```bash
+# Run all null-related benchmarks
+build/release/benchmark/benchmark_runner "benchmark/micro/nulls/.*"
+
+# Run all aggregation benchmarks  
+build/release/benchmark/benchmark_runner "benchmark/micro/aggregate/.*"
+```
+
+Note: Quote patterns to prevent shell expansion.
+
+### Running All Benchmarks
+
+```bash
+build/release/benchmark/benchmark_runner
+```
+
+Warning: This may take several hours to complete.
+
+### Output Options
+
+Save timing results to a file:
+
+```bash
+build/release/benchmark/benchmark_runner \
+    benchmark/micro/nulls/no_nulls_addition.benchmark \
+    --out=timings.out
+```
+
+Output format (one timing per line):
+
+```
+0.182472
+0.185027
+0.184163
+0.185281
+0.182948
+```
+
+### Benchmark Information
+
+View benchmark metadata:
+
+```bash
+build/release/benchmark/benchmark_runner \
+    benchmark/micro/nulls/no_nulls_addition.benchmark \
+    --info
+```
+
+Output:
+
+```
+display_name:NULL Addition (no nulls)
+group:micro
+subgroup:nulls
+```
+
+### Viewing Queries
+
+Print the benchmark query:
+
+```bash
+build/release/benchmark/benchmark_runner \
+    benchmark/micro/nulls/no_nulls_addition.benchmark \
+    --query
+```
+
+Output:
+
+```sql
+SELECT MIN(i + 1) FROM integers
+```
+
+### Profiling Benchmarks
+
+Generate a query profile:
+
+```bash
+build/release/benchmark/benchmark_runner \
+    benchmark/micro/nulls/no_nulls_addition.benchmark \
+    --profile
+```
+
+Output shows a detailed query tree with timing information:
+
+```
+┌─────────────────────────────────────┐
+│┌───────────────────────────────────┐│
+││    Query Profiling Information    ││
+│└───────────────────────────────────┘│
+└─────────────────────────────────────┘
+SELECT MIN(i + 1) FROM integers
+┌─────────────────────────────────────┐
+│┌───────────────────────────────────┐│
+││         Total Time: 0.176s        ││
+│└───────────────────────────────────┘│
+└─────────────────────────────────────┘
+┌───────────────────────────┐
+│    UNGROUPED_AGGREGATE    │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│          min(#0)          │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│             1             │
+│          (0.03s)          │
+└─────────────┬─────────────┘                             
+┌─────────────┴─────────────┐
+│         PROJECTION        │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│          +(i, 1)          │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│         100000000         │
+│          (0.05s)          │
+└─────────────┬─────────────┘                             
+┌─────────────┴─────────────┐
+│          SEQ_SCAN         │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│          integers         │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│             i             │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│         100000000         │
+│          (0.08s)          │
+└───────────────────────────┘
+```
+
+## TPC-H Benchmarks
+
+### Overview
+
+TPC-H is an industry-standard decision support benchmark consisting of 22 complex queries that simulate business intelligence workloads.
+
+From `benchmark/tpch/sf1/tpch_sf1.benchmark.in:8`:
+
+```
+group tpch
+subgroup sf${sf}
+```
+
+### Scale Factors
+
+TPC-H supports multiple scale factors (SF):
+
+- **SF1** - 1 GB dataset (~6 million order rows)
+- **SF10** - 10 GB dataset  
+- **SF100** - 100 GB dataset
+
+Larger scale factors test scalability and memory management.
+
+### Query Types
+
+TPC-H queries cover:
+
+- **Aggregations** - SUM, COUNT, AVG with GROUP BY
+- **Joins** - Multi-way joins across fact and dimension tables
+- **Subqueries** - Correlated and uncorrelated subqueries
+- **Sorting** - ORDER BY with various columns
+- **Window functions** - ROW_NUMBER, RANK, etc.
+
+### Schema
+
+TPC-H models a wholesale supplier database:
+
+- `customer` - Customer information
+- `orders` - Customer orders
+- `lineitem` - Order line items (largest table)
+- `part` - Parts catalog
+- `supplier` - Supplier information  
+- `partsupp` - Parts supplied by suppliers
+- `nation` - Nation codes
+- `region` - Geographic regions
+
+### Running TPC-H Benchmarks
+
+Run a specific TPC-H query at SF1:
+
+```bash
+build/release/benchmark/benchmark_runner benchmark/tpch/sf1/q01.benchmark
+```
+
+Run all TPC-H queries:
+
+```bash
+build/release/benchmark/benchmark_runner "benchmark/tpch/sf1/.*"
+```
+
+### Example TPC-H Query (Q1)
+
+Pricing summary report:
+
+```sql
+SELECT
+    l_returnflag,
+    l_linestatus,
+    SUM(l_quantity) AS sum_qty,
+    SUM(l_extendedprice) AS sum_base_price,
+    SUM(l_extendedprice * (1 - l_discount)) AS sum_disc_price,
+    SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge,
+    AVG(l_quantity) AS avg_qty,
+    AVG(l_extendedprice) AS avg_price,
+    AVG(l_discount) AS avg_disc,
+    COUNT(*) AS count_order
+FROM
+    lineitem
+WHERE
+    l_shipdate <= DATE '1998-12-01' - INTERVAL '90' DAY
+GROUP BY
+    l_returnflag,
+    l_linestatus
+ORDER BY
+    l_returnflag,
+    l_linestatus;
+```
+
+This query tests:
+- Filter pushdown on dates
+- Multiple aggregation functions
+- Arithmetic in aggregates  
+- GROUP BY and ORDER BY
+
+## TPC-DS Benchmarks
+
+### Overview
+
+TPC-DS is a more complex decision support benchmark with 99 queries modeling retail product analytics.
+
+From `benchmark/tpcds/sf1/tpcds_sf1.benchmark.in:8`:
+
+```
+group tpcds
+subgroup sf${sf}
+```
+
+### Key Differences from TPC-H
+
+- **More queries** - 99 vs. 22 queries
+- **More complex** - Deeper nesting, more joins
+- **More tables** - 24 tables vs. 8 tables  
+- **More features** - ROLLUP, CUBE, window functions
+
+### Running TPC-DS Benchmarks
+
+```bash
+# Run a specific query
+build/release/benchmark/benchmark_runner benchmark/tpcds/sf1/q01.benchmark
+
+# Run all TPC-DS queries
+build/release/benchmark/benchmark_runner "benchmark/tpcds/sf1/.*"
+```
+
+## Micro-Benchmarks
+
+### Zone Maps
+
+From `benchmark/micro/zonemaps/zonemaps.benchmark:9`:
+
+```sql
+CREATE TABLE t AS 
+SELECT 
+    range a, 
+    length(range::VARCHAR) b, 
+    mod(range, 10000) c, 
+    5 d, 
+    10000 e 
+FROM range(100000000);
+
+SELECT count(*) FROM t WHERE b IN (1, 2, 4);
+```
+
+This tests zone map pruning effectiveness on different column patterns.
+
+### Aggregation Benchmarks
+
+```bash
+build/release/benchmark/benchmark_runner "benchmark/micro/aggregate/.*"
+```
+
+Tests:
+- Simple aggregates (SUM, COUNT, AVG)
+- GROUP BY with various cardinalities
+- DISTINCT aggregates  
+- Multiple aggregates in one query
+
+### Join Benchmarks
+
+```bash
+build/release/benchmark/benchmark_runner "benchmark/micro/join/.*"
+```
+
+Tests:
+- Hash joins
+- Nested loop joins
+- Index joins
+- Join ordering optimization
+
+### String Benchmarks
+
+```bash  
+build/release/benchmark/benchmark_runner "benchmark/micro/string/.*"
+```
+
+Tests:
+- String functions (UPPER, LOWER, SUBSTRING)
+- LIKE and regex matching
+- String aggregation
+- String comparison
+
+## Performance Characteristics
+
+### Columnar Storage Benefits
+
+DuckDB's columnar storage excels at:
+
+- **Aggregations** - Process only needed columns
+- **Compression** - Similar values compress well
+- **SIMD operations** - Vectorized execution on columns
+- **Zone map pruning** - Skip irrelevant row groups
+
+### Query Performance Patterns
+
+**Fast queries**:
+- Highly selective filters with zone map pruning
+- Aggregations over few columns
+- Sorted data matching query ORDER BY
+
+**Slower queries**:
+- Full table scans without filters
+- High-cardinality GROUP BY
+- Complex join graphs without statistics
+- Random access patterns
+
+### Memory Management
+
+DuckDB automatically:
+- Spills to disk when memory exceeds limits
+- Uses streaming operators for large results
+- Optimizes hash table sizes based on cardinality
+
+Configure memory limits:
+
+```sql
+SET memory_limit='4GB';
+SET threads=4;
+```
+
+## Creating Custom Benchmarks
+
+### Benchmark File Format
+
+Create a `.benchmark` file:
+
+```
+# name: benchmark/custom/my_benchmark.benchmark
+# description: Custom aggregation benchmark
+# group: [custom]
+
+name Custom Aggregation
+group custom
+
+load
+CREATE TABLE data AS 
+SELECT 
+    (random() * 1000)::INTEGER AS category,
+    random() AS value
+FROM range(10000000);
+
+run
+SELECT category, SUM(value), AVG(value), COUNT(*)
+FROM data
+GROUP BY category;
+
+result I I I I
+```
+
+Sections:
+- `name` - Display name
+- `group` - Category for organization  
+- `load` - Setup queries (run once)
+- `run` - Benchmark query (run multiple times)
+- `result` - Optional expected result format
+
+### Running Custom Benchmarks
+
+```bash
+build/release/benchmark/benchmark_runner benchmark/custom/my_benchmark.benchmark
+```
+
+## Performance Analysis Tips
+
+1. **Consistent environment** - Disable CPU frequency scaling, close other applications
+
+2. **Multiple runs** - Average at least 5 runs to account for variance
+
+3. **Warm cache** - Run once to warm OS page cache, then measure
+
+4. **Profile first** - Use `--profile` to identify bottlenecks before optimizing
+
+5. **Compare apples to apples** - Same scale factor, same hardware, same configuration
+
+6. **Monitor resources** - Check CPU, memory, and I/O during benchmarks
+
+7. **Version control** - Record DuckDB version and configuration:
+   ```sql
+   SELECT * FROM pragma_version();
+   ```
+
+## See Also
+
+- [Query Optimization](/performance/optimization) - Understanding query plans
+- [Indexing Strategies](/performance/indexing) - Using indexes and zone maps effectively

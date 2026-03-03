@@ -1,0 +1,366 @@
+---
+title: Data Import Methods
+description: Learn how to import data from CSV, Parquet, and other formats into DuckDB
+---
+
+DuckDB provides multiple convenient methods for importing data from various file formats. Data import is designed to be simple and intuitive, often requiring just a single SQL statement.
+
+## Direct File Querying
+
+The simplest way to import data is to reference files directly in the FROM clause. DuckDB automatically detects the file format and schema.
+
+### CSV Files
+
+Query CSV files directly without creating a table:
+
+```sql
+SELECT * FROM 'myfile.csv';
+```
+
+DuckDB automatically:
+- Detects delimiters (comma, tab, pipe, etc.)
+- Infers column types
+- Handles quoted strings and escape characters
+- Processes headers
+
+<CodeGroup>
+```sql Basic CSV Query
+SELECT * FROM 'data.csv';
+```
+
+```sql CSV with Filters
+SELECT name, age 
+FROM 'users.csv' 
+WHERE age > 21;
+```
+
+```sql Multiple CSV Files (Glob)
+SELECT * FROM 'data/*.csv';
+```
+</CodeGroup>
+
+### Parquet Files
+
+Parquet files work the same way as CSV:
+
+```sql
+SELECT * FROM 'myfile.parquet';
+```
+
+Parquet offers several advantages:
+- Columnar storage format
+- Built-in compression
+- Type information preserved
+- Faster query performance for analytical workloads
+
+<Tip>
+Parquet files are ideal for analytical queries because DuckDB can skip reading unnecessary columns and row groups.
+</Tip>
+
+## The COPY Command
+
+The COPY command loads data from files into tables and exports table data to files.
+
+### COPY FROM - Import Data
+
+Load data from a CSV file into a table:
+
+<CodeGroup>
+```sql Basic COPY FROM
+CREATE TABLE test (
+  a INTEGER, 
+  b INTEGER, 
+  c VARCHAR(10)
+);
+
+COPY test FROM 'test.csv';
+```
+
+```sql COPY with Options
+CREATE TABLE users (
+  id INTEGER NOT NULL,
+  name VARCHAR(10) NOT NULL,
+  email VARCHAR
+);
+
+COPY users FROM 'users.csv' (
+  DELIMITER ',',
+  HEADER TRUE,
+  NULL_PADDING TRUE,
+  IGNORE_ERRORS TRUE
+);
+```
+</CodeGroup>
+
+### COPY TO - Export Data
+
+Export table data to a CSV file:
+
+```sql
+-- Export entire table
+COPY test TO 'output.csv';
+
+-- Export query results
+COPY (
+  SELECT a, b 
+  FROM test 
+  WHERE a < 4000
+) TO 'filtered_output.csv';
+```
+
+<Note>
+COPY returns the number of rows copied, making it easy to verify import/export operations.
+</Note>
+
+## INSERT Statements
+
+### INSERT with VALUES
+
+Insert individual rows using the VALUES clause:
+
+<CodeGroup>
+```sql Single Row
+INSERT INTO test VALUES (11, 22, 'hello');
+```
+
+```sql Multiple Rows
+INSERT INTO empsalary VALUES 
+  ('develop', 10, 5200, '2007-08-01'),
+  ('sales', 1, 5000, '2006-10-01'),
+  ('personnel', 5, 3500, '2007-12-10'),
+  ('sales', 4, 4800, '2007-08-08');
+```
+</CodeGroup>
+
+### INSERT with SELECT
+
+Insert data from a query, including file queries:
+
+```sql
+-- Insert from another table
+INSERT INTO test2
+SELECT * FROM test WHERE a > 100;
+
+-- Insert from CSV file
+INSERT INTO users
+SELECT * FROM 'users.csv';
+
+-- Insert with transformation
+INSERT INTO users
+SELECT 
+  id,
+  UPPER(name) AS name,
+  email
+FROM 'users.csv'
+WHERE email IS NOT NULL;
+```
+
+### INSERT BY NAME
+
+Insert data matching by column names instead of position:
+
+```sql
+INSERT INTO users BY NAME
+SELECT email, name, id FROM 'input.csv';
+```
+
+## Reading Functions
+
+DuckDB provides specialized functions for reading different file formats with fine-grained control.
+
+### read_csv Function
+
+The `read_csv` function provides advanced CSV reading options:
+
+<CodeGroup>
+```sql Basic read_csv
+SELECT * FROM read_csv('data.csv');
+```
+
+```sql With Options
+SELECT * 
+FROM read_csv(
+  'data.csv',
+  delim = '|',
+  header = TRUE,
+  columns = {
+    'id': 'INTEGER',
+    'name': 'VARCHAR',
+    'email': 'VARCHAR'
+  },
+  ignore_errors = TRUE,
+  null_padding = TRUE
+);
+```
+
+```sql Type Pushdown
+CREATE TABLE users (
+  id INTEGER NOT NULL,
+  name VARCHAR(10) NOT NULL,
+  email VARCHAR
+);
+
+INSERT INTO users
+SELECT *
+FROM read_csv(
+  'users.csv', 
+  ignore_errors = TRUE, 
+  null_padding = TRUE
+);
+```
+</CodeGroup>
+
+### read_parquet Function
+
+```sql
+SELECT * FROM read_parquet('data.parquet');
+
+-- Multiple files
+SELECT * FROM read_parquet(['file1.parquet', 'file2.parquet']);
+
+-- Glob pattern
+SELECT * FROM read_parquet('data/**/*.parquet');
+```
+
+## Import Options
+
+### Handling Errors
+
+Control how DuckDB handles malformed data:
+
+```sql
+-- Ignore rows with errors
+SELECT * FROM read_csv('data.csv', ignore_errors = TRUE);
+
+-- Pad missing columns with NULL
+SELECT * FROM read_csv('data.csv', null_padding = TRUE);
+```
+
+### Union by Name
+
+Combine files with different column orders:
+
+```sql
+CREATE TABLE users_age (
+  id INTEGER NOT NULL,
+  name VARCHAR(10) NOT NULL,
+  email VARCHAR,
+  age INTEGER
+);
+
+INSERT INTO users_age
+SELECT *
+FROM read_csv(
+  'data/*.csv', 
+  union_by_name = TRUE,
+  ignore_errors = TRUE
+);
+```
+
+### Glob Patterns
+
+Read multiple files with pattern matching:
+
+<CodeGroup>
+```sql All CSV Files
+SELECT * FROM 'data/*.csv';
+```
+
+```sql Recursive Glob
+SELECT * FROM 'data/**/*.parquet';
+```
+
+```sql Multiple Patterns
+INSERT INTO users
+SELECT * FROM read_csv(
+  'data/f_*.csv',
+  ignore_errors = TRUE
+);
+```
+</CodeGroup>
+
+## Type Detection and Conversion
+
+DuckDB automatically detects types from files, but you can also specify them explicitly:
+
+```sql
+-- Automatic type detection
+SELECT * FROM 'data.csv';
+
+-- Explicit type specification
+SELECT * FROM read_csv('data.csv', columns = {
+  'id': 'INTEGER',
+  'created_at': 'TIMESTAMP',
+  'amount': 'DECIMAL(10,2)'
+});
+
+-- Type pushdown from target table
+CREATE TABLE timestamps(ts TIMESTAMP, dt DATE);
+INSERT INTO timestamps 
+SELECT ts, ts FROM read_csv('timestamp.csv');
+```
+
+<Note>
+When inserting into a table, DuckDB can push down type information to the CSV reader, improving performance and error handling.
+</Note>
+
+## Best Practices
+
+<Tip>
+For large datasets, use Parquet format instead of CSV for:
+- Faster query performance
+- Smaller file sizes
+- Type safety
+- Column pruning benefits
+</Tip>
+
+### Performance Tips
+
+1. **Use Parquet for analytical workloads**: Parquet's columnar format is optimized for DuckDB
+2. **Leverage glob patterns**: Read multiple files in parallel
+3. **Specify types when known**: Avoid auto-detection overhead for large files
+4. **Use COPY for bulk loads**: COPY is optimized for loading large datasets
+
+### Error Handling
+
+```sql
+-- Robust import with error handling
+CREATE TABLE users (
+  id INTEGER NOT NULL,
+  name VARCHAR(10) NOT NULL,
+  email VARCHAR
+);
+
+INSERT INTO users
+SELECT *
+FROM read_csv(
+  'users.csv',
+  ignore_errors = TRUE,  -- Skip malformed rows
+  null_padding = TRUE    -- Handle missing columns
+);
+```
+
+## Examples
+
+### Complete Import Workflow
+
+```sql
+-- Create table
+CREATE TABLE sales (
+  order_id INTEGER,
+  customer VARCHAR,
+  amount DECIMAL(10,2),
+  order_date DATE
+);
+
+-- Import from CSV
+COPY sales FROM 'sales_data.csv';
+
+-- Verify import
+SELECT COUNT(*), SUM(amount) FROM sales;
+
+-- Export filtered results
+COPY (
+  SELECT * FROM sales WHERE order_date >= '2024-01-01'
+) TO 'sales_2024.parquet' (FORMAT PARQUET);
+```

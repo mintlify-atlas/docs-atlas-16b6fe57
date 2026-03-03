@@ -1,0 +1,709 @@
+---
+title: Meta Commands
+description: Dot commands for controlling the DuckDB CLI
+---
+
+Meta commands (also called dot commands) are special commands that start with a dot (`.`) and control the behavior of the DuckDB CLI.
+
+## Getting Help
+
+### .help
+
+Display help information for all commands:
+
+```sql
+.help
+```
+
+Get help for a specific command:
+
+```sql
+.help import
+```
+
+Show all commands with extended information:
+
+```sql
+.help --all
+```
+
+## Database Operations
+
+### .open
+
+Open a database file:
+
+```sql
+.open mydata.db
+```
+
+Open in read-only mode:
+
+```sql
+.open --readonly mydata.db
+```
+
+Create a new database (deleting existing file):
+
+```sql
+.open --new mydata.db
+```
+
+Open using a SQL query result:
+
+```sql
+.open --sql "SELECT 'my_' || current_date() || '.db'"
+```
+
+### .databases
+
+List all attached databases:
+
+```sql
+.databases
+```
+
+Output:
+```
+main: /path/to/mydata.db
+```
+
+### .tables
+
+List all tables:
+
+```sql
+.tables
+```
+
+List tables matching a pattern:
+
+```sql
+.tables user%
+```
+
+### .schema
+
+Show CREATE statements for all tables:
+
+```sql
+.schema
+```
+
+Show schema for specific table:
+
+```sql
+.schema employees
+```
+
+Pretty-print schema:
+
+```sql
+.schema --indent employees
+```
+
+### .indexes
+
+Show all indexes:
+
+```sql
+.indexes
+```
+
+Show indexes for a specific table:
+
+```sql
+.indexes employees
+```
+
+## Import and Export
+
+### .import
+
+Import data from a file into a table:
+
+```sql
+.import data.csv users
+```
+
+Import CSV with options:
+
+```sql
+.import --csv data.csv users
+```
+
+Import Parquet:
+
+```sql
+.import --parquet data.parquet users
+```
+
+Import JSON:
+
+```sql
+.import --json data.json users
+```
+
+Pass parameters to the reader function:
+
+```sql
+.import --csv --header true --delimiter ";" data.csv users
+```
+
+Notes:
+- If the table doesn't exist, it will be created automatically
+- If no format is specified, it's inferred from the file extension
+- Additional parameters can be passed with `--parameter value` syntax
+
+### .dump
+
+Dump database schema and data as SQL:
+
+```sql
+.dump
+```
+
+Dump specific tables:
+
+```sql
+.dump employees departments
+```
+
+Allow unescaped newlines in output:
+
+```sql
+.dump --newlines
+```
+
+## Output Control
+
+### .mode
+
+Set output mode:
+
+```sql
+.mode duckbox
+```
+
+Available modes:
+- `ascii` - Columns/rows delimited by ASCII separators (0x1F and 0x1E)
+- `box` - Tables using Unicode box-drawing characters
+- `column` - Left-aligned columns (see `.width`)
+- `csv` - Comma-separated values
+- `duckbox` - Tables with extensive formatting features (default)
+- `html` - HTML `<table>` format
+- `insert` - SQL INSERT statements
+- `json` - Results as JSON array
+- `jsonlines` - Results as newline-delimited JSON
+- `latex` - LaTeX tabular environment
+- `line` - One value per line
+- `list` - Values delimited by `|`
+- `markdown` - Markdown table format
+- `quote` - Escape values as for SQL
+- `table` - ASCII-art table
+- `tabs` - Tab-separated values
+- `tcl` - TCL list elements
+- `trash` - No output (useful for benchmarking)
+
+For INSERT mode, specify table name:
+
+```sql
+.mode insert employees
+```
+
+### .headers
+
+Toggle display of column headers:
+
+```sql
+.headers on
+```
+
+```sql
+.headers off
+```
+
+### .separator
+
+Set column separator:
+
+```sql
+.separator ","
+```
+
+Set both column and row separator:
+
+```sql
+.separator "," "\n"
+```
+
+### .nullvalue
+
+Set the string to display for NULL values:
+
+```sql
+.nullvalue NULL
+```
+
+```sql
+.nullvalue "(null)"
+```
+
+### .width
+
+Set column widths for column mode:
+
+```sql
+.width 10 20 15
+```
+
+Negative values right-justify:
+
+```sql
+.width 10 -20 15
+```
+
+### .maxrows
+
+Set maximum number of rows to display (duckbox mode only):
+
+```sql
+.maxrows 100
+```
+
+Set max rows and max analyze rows:
+
+```sql
+.maxrows 100 1000
+```
+
+### .maxwidth
+
+Set maximum display width in characters (duckbox mode only):
+
+```sql
+.maxwidth 120
+```
+
+Set to 0 to use terminal width:
+
+```sql
+.maxwidth 0
+```
+
+## File Operations
+
+### .read
+
+Execute SQL from a file:
+
+```sql
+.read script.sql
+```
+
+### .output
+
+Redirect output to a file:
+
+```sql
+.output results.txt
+SELECT * FROM users;
+.output stdout
+```
+
+Output to a pipe:
+
+```sql
+.output |less
+SELECT * FROM large_table;
+.output stdout
+```
+
+Options:
+- `--bom` - Add UTF-8 byte-order mark
+- `-e` - Send to system text editor
+- `-x` - Send as CSV to spreadsheet
+
+### .once
+
+Redirect output for next command only:
+
+```sql
+.once results.txt
+SELECT * FROM users;
+```
+
+### .excel
+
+Display next query result in spreadsheet:
+
+```sql
+.excel
+SELECT * FROM sales_data;
+```
+
+## Display and Formatting
+
+### .echo
+
+Toggle command echo:
+
+```sql
+.echo on
+```
+
+When enabled, commands are printed before execution.
+
+### .timer
+
+Toggle SQL timer:
+
+```sql
+.timer on
+```
+
+Displays execution time after each query:
+```
+Run Time (s): real 0.001 user 0.000 sys 0.000
+```
+
+### .changes
+
+Show number of rows changed by SQL:
+
+```sql
+.changes on
+```
+
+### .bail
+
+Stop after hitting an error:
+
+```sql
+.bail on
+```
+
+### .print
+
+Print a literal string:
+
+```sql
+.print "Processing data..."
+```
+
+## Rendering and Highlighting
+
+### .highlight
+
+Toggle syntax highlighting:
+
+```sql
+.highlight on
+```
+
+### .highlight_mode
+
+Set highlighting mode:
+
+```sql
+.highlight_mode dark
+```
+
+Modes:
+- `auto` - Automatically detect terminal colors
+- `dark` - Dark mode colors
+- `light` - Light mode colors
+- `mixed` - Mixed mode
+
+### .highlight_errors
+
+Toggle error highlighting:
+
+```sql
+.highlight_errors on
+```
+
+### .highlight_results
+
+Toggle result highlighting:
+
+```sql
+.highlight_results on
+```
+
+### .highlight_colors
+
+Configure highlighting colors:
+
+```sql
+.highlight_colors keyword blue
+.highlight_colors constant green
+.highlight_colors comment gray
+```
+
+### .display_colors
+
+Display all available terminal colors:
+
+```sql
+.display_colors
+```
+
+With formatting:
+
+```sql
+.display_colors bold
+.display_colors underline
+```
+
+## Number Formatting (duckbox mode)
+
+### .large_number_rendering
+
+Configure readable rendering of large numbers:
+
+```sql
+.large_number_rendering all
+```
+
+Modes:
+- `all` - Format all large numbers
+- `footer` - Show formatted numbers in footer only
+- `off` - Disable formatting
+
+### .decimal_sep
+
+Set decimal separator:
+
+```sql
+.decimal_sep ","
+```
+
+### .thousand_sep
+
+Set thousands separator:
+
+```sql
+.thousand_sep "_"
+```
+
+Example with separators:
+```sql
+.thousand_sep "_"
+.decimal_sep "."
+SELECT 1234567.89;
+-- Displays as: 1_234_567.89
+```
+
+## Pager Control
+
+### .pager
+
+Configure pager for output:
+
+```sql
+-- Turn pager on
+.pager on
+
+-- Turn pager off
+.pager off
+
+-- Automatic mode (default)
+.pager automatic
+```
+
+Set custom pager command:
+
+```sql
+.pager less -SRX
+```
+
+Set row threshold for automatic mode:
+
+```sql
+.pager set_row_threshold 100
+```
+
+## Prompt Customization
+
+### .prompt
+
+Customize prompts:
+
+```sql
+.prompt "duckdb> " "   ...> "
+```
+
+Arguments:
+1. Main prompt
+2. Continuation prompt  
+3. Selected continuation prompt (optional)
+4. Scroll up prompt (optional)
+5. Scroll down prompt (optional)
+
+## Progress Bar
+
+### .progress_bar
+
+Configure progress bar display:
+
+```sql
+-- Clear all components
+.progress_bar --clear
+
+-- Add a component
+.progress_bar --add percentage
+```
+
+## System Commands
+
+### .shell (or .system)
+
+Run system command:
+
+```sql
+.shell ls -la
+```
+
+```sql
+.system pwd
+```
+
+Note: Not available in safe mode.
+
+### .cd
+
+Change working directory:
+
+```sql
+.cd /path/to/directory
+```
+
+Note: Not available in safe mode.
+
+## Information Display
+
+### .show
+
+Show current configuration:
+
+```sql
+.show
+```
+
+Displays all current settings including output mode, separators, and other options.
+
+### .version
+
+Show DuckDB version:
+
+```sql
+.version
+```
+
+Output:
+```
+DuckDB v1.2.0 (dev) abc123
+```
+
+### .about
+
+Show information about DuckDB:
+
+```sql
+.about
+```
+
+### .last
+
+Render the last result without truncation:
+
+```sql
+.last
+```
+
+Useful when a previous query result was truncated.
+
+## Special Features
+
+### .columns and .rows
+
+Switch between column-wise and row-wise rendering:
+
+```sql
+.columns  -- Column-wise rendering
+.rows     -- Row-wise rendering (default)
+```
+
+### .log
+
+Turn logging on or off:
+
+```sql
+.log output.log
+.log off
+```
+
+Log to stderr or stdout:
+
+```sql
+.log stderr
+.log stdout
+```
+
+### .edit
+
+Open external text editor to edit a query:
+
+```sql
+.edit
+```
+
+The editor is determined by environment variables:
+1. `DUCKDB_EDITOR`
+2. `EDITOR`
+3. `VISUAL`
+4. Default: `vi`
+
+Alias: `\e`
+
+## Session Control
+
+### .quit or .exit
+
+Exit the DuckDB CLI:
+
+```sql
+.quit
+```
+
+```sql
+.exit
+```
+
+Exit with specific return code:
+
+```sql
+.exit 0
+```
+
+## Safe Mode
+
+Safe mode disables potentially dangerous operations:
+
+```sql
+.safe_mode
+```
+
+In safe mode, the following commands are disabled:
+- `.import`
+- `.open`
+- `.cd`
+- `.shell` / `.system`
+- `.log`
+
+Start the CLI in safe mode:
+
+```bash
+duckdb -safe mydata.db
+```

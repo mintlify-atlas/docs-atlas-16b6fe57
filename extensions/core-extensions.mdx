@@ -1,0 +1,184 @@
+---
+title: Core Extensions
+description: Overview of core in-tree extensions included with DuckDB
+---
+
+## Core In-Tree Extensions
+
+DuckDB includes several core in-tree extensions that provide fundamental functionality. These extensions are maintained by the DuckDB team and are considered essential to the database's capabilities.
+
+<CardGroup cols={2}>
+  <Card title="Parquet" icon="file">
+    **Apache Parquet file format support**
+    
+    Read and write Parquet files with full support for:
+    - Columnar storage format
+    - Compression (Snappy, ZSTD, etc.)
+    - Encryption and decryption
+    - Statistics and bloom filters
+    - Nested data types
+    - Dictionary encoding
+    
+    The Parquet extension is typically statically linked into DuckDB by default.
+  </Card>
+
+  <Card title="JSON" icon="brackets-curly">
+    **JSON data type and functions**
+    
+    Comprehensive JSON support including:
+    - Native JSON data type
+    - JSON parsing and generation functions
+    - JSONPath-style extraction
+    - JSON schema inference
+    - Reading/writing JSON and NDJSON files
+    - Streaming JSON processing
+    
+    Includes table functions like `read_json()` and scalar functions for JSON manipulation.
+  </Card>
+
+  <Card title="ICU" icon="globe">
+    **International Components for Unicode**
+    
+    Provides internationalization support:
+    - Locale-based collation for string ordering
+    - Time zone support for timestamp operations
+    - Support for 100+ locales
+    - Case-insensitive comparisons
+    - Unicode normalization
+    
+    The ICU extension includes all necessary data for collation and timezone operations, with a compiled size of approximately 6MB.
+  </Card>
+
+  <Card title="Autocomplete" icon="text">
+    **SQL autocomplete functionality**
+    
+    Powers intelligent SQL completion:
+    - PEG-based grammar parser
+    - Context-aware suggestions
+    - Keyword and identifier completion
+    - Schema-aware table/column suggestions
+    
+    Uses a sophisticated parsing expression grammar (PEG) system for accurate SQL parsing and completion.
+  </Card>
+
+  <Card title="TPC-H" icon="database">
+    **TPC-H benchmark data generator**
+    
+    Generate TPC-H benchmark data:
+    - Scale factor support (0.01 to large scales)
+    - 22 TPC-H benchmark queries
+    - Answer validation for scale factors 0.01, 0.1, and 1
+    - Multi-threaded data generation
+    
+    Functions:
+    - `dbgen(sf => scale_factor)` - Generate TPC-H schema and data
+    - `tpch_queries()` - List all TPC-H queries
+    - `tpch_answers()` - Get expected query results
+    - `PRAGMA tpch(query_number)` - Run specific TPC-H query
+  </Card>
+
+  <Card title="TPC-DS" icon="chart-line">
+    **TPC-DS benchmark data generator**
+    
+    Generate TPC-DS benchmark data:
+    - Scale factor support
+    - Complete TPC-DS query suite
+    - Answer validation for multiple scale factors
+    - Schema generation with optional keys
+    
+    Functions:
+    - `dsdgen(sf => scale_factor)` - Generate TPC-DS schema and data
+    - `tpcds_queries()` - List all TPC-DS queries
+    - `tpcds_answers()` - Get expected query results
+    - `PRAGMA tpcds(query_number)` - Run specific TPC-DS query
+  </Card>
+</CardGroup>
+
+## Usage Examples
+
+### TPC-H Benchmark
+
+```sql
+-- Generate TPC-H data at scale factor 0.1
+CALL dbgen(sf => 0.1);
+
+-- Run TPC-H query 1
+PRAGMA tpch(1);
+
+-- List all available queries
+SELECT * FROM tpch_queries();
+```
+
+### TPC-DS Benchmark
+
+```sql
+-- Generate TPC-DS data at scale factor 1
+CALL dsdgen(sf => 1);
+
+-- Run TPC-DS query 1
+PRAGMA tpcds(1);
+
+-- Generate with custom schema and catalog
+CALL dsdgen(sf => 1, catalog => 'my_catalog', schema => 'benchmark');
+```
+
+### Parquet Files
+
+```sql
+-- Read a Parquet file
+SELECT * FROM 'data.parquet';
+
+-- Write to Parquet with compression
+COPY (SELECT * FROM my_table) 
+TO 'output.parquet' 
+(FORMAT PARQUET, COMPRESSION ZSTD);
+```
+
+### JSON Processing
+
+```sql
+-- Read NDJSON file
+SELECT * FROM 'data.ndjson';
+
+-- Extract JSON field
+SELECT json_extract(data, '$.user.name') 
+FROM json_table;
+
+-- Convert to JSON
+SELECT to_json(my_struct) FROM my_table;
+```
+
+### ICU Collation
+
+```sql
+-- Order strings using German collation
+SELECT name 
+FROM customers 
+ORDER BY name COLLATE de;
+
+-- Case-insensitive comparison
+SELECT * 
+FROM users 
+WHERE name COLLATE NOCASE = 'john';
+```
+
+## Extension Information
+
+To see which extensions are loaded or available:
+
+```sql
+-- List all extensions and their status
+SELECT extension_name, loaded, installed 
+FROM duckdb_extensions();
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Loading Extensions" icon="download" href="/extensions/loading">
+    Learn how to install and load extensions at runtime
+  </Card>
+  <Card title="Building Extensions" icon="hammer" href="/extensions/building">
+    Build custom extensions from source
+  </Card>
+</CardGroup>

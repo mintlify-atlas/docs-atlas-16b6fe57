@@ -1,0 +1,340 @@
+---
+title: JSON Files
+description: Read JSON files and work with JSON data using DuckDB's native JSON support
+---
+
+DuckDB provides comprehensive support for JSON data, including reading JSON files directly, querying JSON structures, and working with the JSON data type.
+
+## Reading JSON Files
+
+Query JSON files directly without manual data loading:
+
+```sql
+SELECT * FROM 'data.json';
+```
+
+DuckDB automatically detects JSON format and structure.
+
+## Using read_json_auto
+
+For more control over JSON reading:
+
+<CodeGroup>
+```sql Newline-Delimited JSON
+SELECT * FROM read_json_auto('movies.ndjson');
+```
+
+```sql JSON Array
+SELECT * FROM read_json_auto('movies.json');
+```
+
+```sql Multiple Files
+SELECT * FROM read_json_auto('data/*.ndjson');
+```
+
+```sql With Filename
+SELECT *, filename 
+FROM read_json_auto('data/*.ndjson', filename = true);
+```
+</CodeGroup>
+
+## JSON File Formats
+
+DuckDB supports multiple JSON file formats:
+
+### Newline-Delimited JSON (NDJSON)
+
+```json
+{"id": 1, "name": "O Brother, Where Art Thou?"}
+{"id": 2, "name": "Home for the Holidays"}
+{"id": 3, "name": "The Firm"}
+```
+
+```sql
+SELECT * FROM 'movies.ndjson';
+```
+
+### JSON Array
+
+```json
+[
+  {"id": 1, "name": "O Brother, Where Art Thou?"},
+  {"id": 2, "name": "Home for the Holidays"},
+  {"id": 3, "name": "The Firm"}
+]
+```
+
+```sql
+SELECT * FROM 'movies.json';
+```
+
+## Multiple Files and Union
+
+Combine JSON files with different schemas:
+
+```sql
+SELECT * FROM read_json_auto(
+  ['file1.ndjson', 'file2.json'],
+  union_by_name = true
+)
+ORDER BY id;
+```
+
+Missing fields are filled with NULL values.
+
+## Reading JSON Objects
+
+Preserve raw JSON structure with `read_json_objects`:
+
+```sql
+SELECT * FROM read_json_objects_auto('data.ndjson');
+```
+
+This returns each JSON object as a single JSON column:
+
+```
+{"id":1,"name":"O Brother, Where Art Thou?"}
+{"id":2,"name":"Home for the Holidays"}
+{"id":3,"name":"The Firm"}
+```
+
+## The JSON Data Type
+
+DuckDB provides a native JSON type for storing and querying JSON data:
+
+```sql
+CREATE TABLE events (
+  id INTEGER,
+  data JSON
+);
+
+INSERT INTO events VALUES 
+  (1, '{"user": "alice", "action": "login"}'),
+  (2, '{"user": "bob", "action": "purchase", "amount": 99.99}');
+```
+
+## JSON Functions
+
+DuckDB provides rich functions for working with JSON data:
+
+### json_extract
+
+Extract values from JSON:
+
+<CodeGroup>
+```sql JSONPath Syntax
+SELECT json_extract(
+  '{"my_field": {"my_nested_field": ["goose", "duck"]}}',
+  '$.my_field.my_nested_field[1]'
+);
+-- Result: "duck"
+```
+
+```sql Slash Syntax
+SELECT json_extract(
+  '{"my_field": {"my_nested_field": ["goose", "duck"]}}',
+  '/my_field/my_nested_field/1'
+);
+-- Result: "duck"
+```
+
+```sql Arrow Operator
+SELECT '{"my_field": {"my_nested_field": ["goose", "duck"]}}'::JSON
+  -> '/my_field/my_nested_field/1';
+-- Result: "duck"
+```
+</CodeGroup>
+
+### json_extract_string
+
+Extract values as strings (removes quotes):
+
+<CodeGroup>
+```sql Function Syntax
+SELECT json_extract_string(
+  '{"my_field": {"my_nested_field": ["goose", "duck"]}}',
+  '/my_field/my_nested_field/1'
+);
+-- Result: duck
+```
+
+```sql Operator Syntax
+SELECT '{"my_field": {"my_nested_field": ["goose", "duck"]}}'::JSON
+  ->> '/my_field/my_nested_field/1';
+-- Result: duck
+```
+</CodeGroup>
+
+### json_extract_path
+
+Alias for `json_extract`:
+
+```sql
+SELECT json_extract_path(
+  '{"user": {"name": "alice"}}',
+  '/user/name'
+);
+-- Result: "alice"
+```
+
+### Handling NULL Values
+
+JSON functions properly handle NULL:
+
+<CodeGroup>
+```sql NULL in JSON
+SELECT json_extract('{"foo": null}', '$.foo');
+-- Result: null (JSON null)
+```
+
+```sql Missing Path
+SELECT json_extract('{"foo": null}', '$.foo.bar');
+-- Result: NULL (SQL NULL)
+```
+
+```sql NULL Document
+SELECT json_extract('null', '$');
+-- Result: null (JSON null)
+```
+</CodeGroup>
+
+## JSON Structure Analysis
+
+Analyze JSON structure:
+
+```sql
+SELECT json_structure('{"duck":"goose"}'->'duck');
+-- Result: "VARCHAR"
+```
+
+## Querying Nested JSON
+
+Work with complex nested structures:
+
+```sql
+SELECT 
+  id,
+  data->>'user' AS user,
+  data->>'action' AS action,
+  CAST(data->>'amount' AS DECIMAL) AS amount
+FROM events;
+```
+
+Result:
+```
+id | user  | action   | amount
+---+-------+----------+-------
+1  | alice | login    | NULL
+2  | bob   | purchase | 99.99
+```
+
+## Array Operations
+
+Extract array elements:
+
+<CodeGroup>
+```sql By Index
+SELECT json_extract('[1, 2, 42]', 2);
+-- Result: 42
+```
+
+```sql As String
+SELECT json_extract_string('[1, 2, 42]', 2);
+-- Result: "42"
+```
+</CodeGroup>
+
+## Writing JSON Files
+
+Export data as JSON:
+
+```sql
+COPY (
+  SELECT id, name FROM movies
+) TO 'output.json' (FORMAT JSON);
+```
+
+## Hive Partitioning with JSON
+
+Read JSON files from Hive-partitioned directories:
+
+```sql
+SELECT j, count(*) 
+FROM read_json_auto(
+  'data/j=*/*.csv',
+  HIVE_PARTITIONING = 1
+)
+GROUP BY j 
+ORDER BY j;
+```
+
+## Common Patterns
+
+### Extract Multiple Fields
+
+```sql
+SELECT 
+  data->>'$.user.id' AS user_id,
+  data->>'$.user.name' AS user_name,
+  data->>'$.timestamp' AS timestamp
+FROM events;
+```
+
+### Filter by JSON Content
+
+```sql
+SELECT * FROM events
+WHERE data->>'action' = 'purchase';
+```
+
+### Convert JSON to Table
+
+```sql
+CREATE TABLE structured_events AS
+SELECT 
+  id,
+  data->>'user' AS user,
+  data->>'action' AS action,
+  CAST(data->>'amount' AS DECIMAL) AS amount
+FROM events;
+```
+
+### Aggregate JSON Arrays
+
+```sql
+SELECT 
+  data->>'user' AS user,
+  COUNT(*) AS action_count
+FROM events
+GROUP BY data->>'user';
+```
+
+## Performance Tips
+
+- Use `json_extract_string` when you need string values (avoids JSON type overhead)
+- For frequent queries on JSON fields, consider extracting them into regular columns
+- JSON files are less efficient than Parquet for analytical queries; consider converting large datasets
+- Use column projection when reading JSON files: `SELECT field1, field2 FROM 'data.json'`
+- Enable `union_by_name` when reading multiple files with varying schemas
+
+## Error Handling
+
+Handle malformed JSON gracefully:
+
+```sql
+SELECT * FROM read_json_auto('data.json',
+  ignore_errors = true
+);
+```
+
+## Virtual Columns
+
+Access file metadata:
+
+```sql
+SELECT 
+  *,
+  filename,
+  parse_filename(filename) AS parsed_name
+FROM read_json_auto('data/*.ndjson');
+```

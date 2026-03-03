@@ -1,0 +1,181 @@
+---
+title: SQL Dialect Overview
+description: Overview of DuckDB's SQL dialect, features, and extensions
+---
+
+DuckDB is a high-performance analytical database system with a rich SQL dialect that supports far beyond basic SQL. DuckDB provides a SQL dialect with support for arbitrary and nested correlated subqueries, window functions, collations, complex types (arrays, structs, maps), and several extensions designed to make SQL easier to use.
+
+## Standard SQL Compliance
+
+DuckDB provides a SQL dialect that is closely aligned with the SQL standard, specifically PostgreSQL compatibility. The database engine is designed to be fast, reliable, portable, and easy to use.
+
+### Core Features
+
+- **ANSI SQL Support**: Full support for standard SQL statements including SELECT, INSERT, UPDATE, DELETE
+- **Transactions**: ACID-compliant transactions with BEGIN, COMMIT, and ROLLBACK
+- **Data Types**: Rich set of data types including integers, decimals, strings, dates, timestamps, and more
+- **Complex Types**: Native support for arrays, structs (records), maps, and nested combinations
+- **NULL Handling**: Proper three-valued logic with NULL support
+
+## Friendly SQL Extensions
+
+DuckDB extends standard SQL with several convenient features to make SQL easier to write and more expressive:
+
+### SELECT * EXCLUDE/REPLACE
+
+Modify SELECT * to exclude or replace specific columns:
+
+```sql
+-- Exclude specific columns
+SELECT * EXCLUDE (password, ssn) FROM users;
+
+-- Replace column with expression
+SELECT * REPLACE (UPPER(name) AS name) FROM users;
+```
+
+### GROUP BY ALL
+
+Automatically group by all non-aggregate columns:
+
+```sql
+-- Instead of listing all columns
+SELECT depname, empno, AVG(salary) 
+FROM empsalary 
+GROUP BY ALL;
+```
+
+### Direct File Querying
+
+Query CSV, Parquet, and JSON files directly without loading:
+
+```sql
+SELECT * FROM 'data.csv';
+SELECT * FROM 'data.parquet';
+SELECT * FROM 'data.json';
+```
+
+### Column Aliases in WHERE/GROUP BY
+
+Use column aliases defined in SELECT within WHERE and GROUP BY:
+
+<CodeGroup>
+```sql Column Alias Example
+SELECT 
+  b % 2 AS f, 
+  SUM(a) 
+FROM test 
+GROUP BY f 
+ORDER BY f;
+```
+
+```sql Nested Aliases
+WITH cte (a) AS (
+  SELECT 1
+)
+SELECT
+  a AS alias1,
+  alias1 AS alias2
+FROM cte
+WHERE alias2 > 0;
+```
+</CodeGroup>
+
+### UNION BY NAME
+
+Union tables by column names instead of position:
+
+```sql
+SELECT name, age FROM users1
+UNION BY NAME
+SELECT age, name FROM users2;
+```
+
+## Query Features
+
+### Correlated Subqueries
+
+DuckDB supports arbitrary and nested correlated subqueries:
+
+```sql
+WITH cte1 AS (SELECT i AS j FROM a) 
+SELECT * FROM cte1 
+WHERE j = (SELECT MAX(j) FROM cte1 AS cte2);
+```
+
+### Column Name Qualification
+
+Explicit table qualification for clarity:
+
+```sql
+SELECT 
+  test.a, 
+  test.b, 
+  test2.c 
+FROM test 
+INNER JOIN test2 ON test.b = test2.b;
+```
+
+## Data Types
+
+DuckDB supports a comprehensive set of data types:
+
+- **Numeric**: INTEGER, BIGINT, SMALLINT, TINYINT, DECIMAL, DOUBLE, FLOAT
+- **Text**: VARCHAR, TEXT
+- **Temporal**: DATE, TIME, TIMESTAMP, INTERVAL
+- **Binary**: BLOB, BITSTRING
+- **Boolean**: BOOLEAN
+- **Complex**: ARRAY, STRUCT, MAP, UNION
+- **Special**: UUID, JSON
+
+<Note>
+DuckDB automatically infers types from CSV and Parquet files, making data import seamless.
+</Note>
+
+## Performance Optimizations
+
+DuckDB's SQL engine includes several performance optimizations:
+
+- **Vectorized Execution**: Processes data in vectorized batches
+- **Parallel Query Execution**: Automatically parallelizes queries
+- **Optimized Join Algorithms**: Hash joins, merge joins, and nested loop joins
+- **Filter Pushdown**: Pushes filters close to data sources
+- **Column Pruning**: Only reads necessary columns from files
+
+<Tip>
+Use `EXPLAIN` to see the query execution plan and understand how DuckDB will execute your query.
+</Tip>
+
+## Example: Complete Query
+
+```sql
+-- Create table
+CREATE TABLE empsalary (
+  depname VARCHAR, 
+  empno BIGINT, 
+  salary INTEGER, 
+  enroll_date DATE
+);
+
+-- Insert data
+INSERT INTO empsalary VALUES 
+  ('develop', 10, 5200, '2007-08-01'),
+  ('sales', 1, 5000, '2006-10-01'),
+  ('personnel', 5, 3500, '2007-12-10');
+
+-- Query with aggregates and window functions
+SELECT 
+  depname,
+  empno,
+  salary,
+  AVG(salary) OVER (PARTITION BY depname) AS dept_avg
+FROM empsalary
+ORDER BY depname, empno;
+```
+
+## Next Steps
+
+- Learn about [Data Import](/sql/data-import) methods
+- Explore [Query Syntax](/sql/queries) in detail
+- Discover [Built-in Functions](/sql/functions)
+- Master [Window Functions](/sql/window-functions)
+- Understand [Join Operations](/sql/joins)

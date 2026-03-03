@@ -1,0 +1,382 @@
+---
+title: Bulk data loading with appender
+description: Efficiently load large amounts of data using the DuckDB appender API
+---
+
+The DuckDB appender API provides a fast way to bulk-load data into tables. It's much faster than individual INSERT statements for large datasets.
+
+## Why Use the Appender?
+
+The appender bypasses SQL parsing and directly writes to the storage layer:
+
+<CardGroup cols={2}>
+  <Card title="High Performance" icon="gauge">
+    10-100x faster than INSERT statements for bulk loading
+  </Card>
+  <Card title="Memory Efficient" icon="memory">
+    Streams data without loading entire dataset into memory
+  </Card>
+  <Card title="Type Safe" icon="check">
+    Validates data types at append time
+  </Card>
+  <Card title="Transaction Support" icon="database">
+    Supports batching with commit/rollback
+  </Card>
+</CardGroup>
+
+## Creating an Appender
+
+Create an appender for a specific table:
+
+```c
+duckdb_state duckdb_appender_create(
+    duckdb_connection connection,
+    const char *schema,
+    const char *table,
+    duckdb_appender *out_appender
+);
+```
+
+<ParamField path="connection" type="duckdb_connection" required>
+  Active database connection.
+</ParamField>
+
+<ParamField path="schema" type="const char*">
+  Schema name. Pass `NULL` to use the default schema ("main").
+</ParamField>
+
+<ParamField path="table" type="const char*" required>
+  Table name to append data to. The table must exist.
+</ParamField>
+
+<ParamField path="out_appender" type="duckdb_appender*" required>
+  Output parameter for the appender handle.
+</ParamField>
+
+**Example**:
+
+```c
+// Create table first
+duckdb_query(con, "CREATE TABLE test(id INTEGER, name VARCHAR, value DOUBLE)", NULL);
+
+// Create appender
+duckdb_appender appender;
+if (duckdb_appender_create(con, NULL, "test", &appender) == DuckDBError) {
+    fprintf(stderr, "Failed to create appender\n");
+    return 1;
+}
+```
+
+## Appending Data
+
+### Append Values by Column
+
+Append values one column at a time, in the order they appear in the table schema:
+
+```c
+// Append typed values
+duckdb_state duckdb_append_bool(duckdb_appender appender, bool value);
+duckdb_state duckdb_append_int8(duckdb_appender appender, int8_t value);
+duckdb_state duckdb_append_int16(duckdb_appender appender, int16_t value);
+duckdb_state duckdb_append_int32(duckdb_appender appender, int32_t value);
+duckdb_state duckdb_append_int64(duckdb_appender appender, int64_t value);
+duckdb_state duckdb_append_float(duckdb_appender appender, float value);
+duckdb_state duckdb_append_double(duckdb_appender appender, double value);
+duckdb_state duckdb_append_varchar(duckdb_appender appender, const char *val);
+duckdb_state duckdb_append_varchar_length(duckdb_appender appender, const char *val, idx_t length);
+duckdb_state duckdb_append_null(duckdb_appender appender);
+
+// Append date/time types
+duckdb_state duckdb_append_date(duckdb_appender appender, duckdb_date value);
+duckdb_state duckdb_append_time(duckdb_appender appender, duckdb_time value);
+duckdb_state duckdb_append_timestamp(duckdb_appender appender, duckdb_timestamp value);
+```
+
+### End Row
+
+After appending all columns for a row, finish the row:
+
+```c
+duckdb_state duckdb_appender_end_row(duckdb_appender appender);
+```
+
+<Note>
+You must append exactly the number of columns in the table schema for each row, in the correct order.
+</Note>
+
+## Complete Example
+
+Bulk load data into a table:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+    duckdb_database db;
+    duckdb_connection con;
+    duckdb_appender appender;
+
+    // Setup
+    duckdb_open(NULL, &db);
+    duckdb_connect(db, &con);
+
+    // Create table
+    duckdb_query(con, "CREATE TABLE employees(id INTEGER, name VARCHAR, salary DOUBLE, hired_date DATE)", NULL);
+
+    // Create appender
+    if (duckdb_appender_create(con, NULL, "employees", &appender) == DuckDBError) {
+        fprintf(stderr, "Failed to create appender\n");
+        goto cleanup;
+    }
+
+    // Append multiple rows
+    for (int i = 1; i <= 1000; i++) {
+        char name[32];
+        sprintf(name, "Employee%d", i);
+
+        // Append columns
+        duckdb_append_int32(appender, i);
+        duckdb_append_varchar(appender, name);
+        duckdb_append_double(appender, 50000.0 + (i * 100));
+
+        // Create date
+        duckdb_date date;
+        date.days = 18628 + i;  // Days since 1970-01-01
+        duckdb_append_date(appender, date);
+
+        // End row
+        duckdb_appender_end_row(appender);
+    }
+
+    // Flush and close appender
+    if (duckdb_appender_close(appender) == DuckDBError) {
+        fprintf(stderr, "Failed to close appender\n");
+    }
+
+    // Verify
+    duckdb_result result;
+    if (duckdb_query(con, "SELECT COUNT(*) FROM employees", &result) == DuckDBSuccess) {
+        int64_t count = duckdb_value_int64(&result, 0, 0);
+        printf("Inserted %lld rows\n", count);
+        duckdb_destroy_result(&result);
+    }
+
+cleanup:
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+    return 0;
+}
+```
+
+## Managing the Appender
+
+### Flush Data
+
+Flush pending data to the database:
+
+```c
+duckdb_state duckdb_appender_flush(duckdb_appender appender);
+```
+
+The appender buffers data internally. Call `flush()` to ensure data is written.
+
+### Close Appender
+
+Close the appender and commit data:
+
+```c
+duckdb_state duckdb_appender_close(duckdb_appender appender);
+```
+
+This flushes any pending data and releases the appender handle.
+
+<Warning>
+If you don't call `duckdb_appender_close()`, pending data may be lost and resources will leak.
+</Warning>
+
+### Destroy Appender
+
+Free appender resources (use after close or on error):
+
+```c
+duckdb_state duckdb_appender_destroy(duckdb_appender *appender);
+```
+
+## Error Handling
+
+Get error message if append fails:
+
+```c
+const char *duckdb_appender_error(duckdb_appender appender);
+```
+
+**Example with error handling**:
+
+```c
+if (duckdb_append_int32(appender, 42) == DuckDBError) {
+    const char *error = duckdb_appender_error(appender);
+    fprintf(stderr, "Append error: %s\n", error ? error : "unknown");
+    duckdb_appender_destroy(&appender);
+    return 1;
+}
+```
+
+## NULL Values
+
+Append NULL values:
+
+```c
+// Append columns for a row
+duckdb_append_int32(appender, 1);
+duckdb_append_varchar(appender, "Alice");
+duckdb_append_null(appender);  // NULL salary
+duckdb_appender_end_row(appender);
+```
+
+## Data Types
+
+The appender supports all DuckDB data types:
+
+| Data Type | Append Function |
+|-----------|----------------|
+| BOOLEAN | `duckdb_append_bool()` |
+| TINYINT | `duckdb_append_int8()` |
+| SMALLINT | `duckdb_append_int16()` |
+| INTEGER | `duckdb_append_int32()` |
+| BIGINT | `duckdb_append_int64()` |
+| FLOAT | `duckdb_append_float()` |
+| DOUBLE | `duckdb_append_double()` |
+| VARCHAR | `duckdb_append_varchar()` |
+| DATE | `duckdb_append_date()` |
+| TIME | `duckdb_append_time()` |
+| TIMESTAMP | `duckdb_append_timestamp()` |
+| NULL | `duckdb_append_null()` |
+
+## Performance Tips
+
+<Steps>
+
+<Step title="Batch size">
+
+The appender automatically batches data. For best performance, append at least 1000-10000 rows before closing.
+
+</Step>
+
+<Step title="Avoid flushing frequently">
+
+Don't call `flush()` after every row. Let the appender manage batching automatically.
+
+</Step>
+
+<Step title="Pre-create indexes">
+
+If you need indexes, create them AFTER loading all data:
+
+```c
+// Load data first
+duckdb_appender_close(appender);
+
+// Then create indexes
+duckdb_query(con, "CREATE INDEX idx_id ON employees(id)", NULL);
+```
+
+</Step>
+
+<Step title="Disable constraints temporarily">
+
+For very large loads, consider temporarily disabling constraints.
+
+</Step>
+
+</Steps>
+
+## CSV Loading Example
+
+Use appender to load CSV data:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+#include <string.h>
+
+void load_csv_file(duckdb_connection con, const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) return;
+
+    duckdb_appender appender;
+    duckdb_appender_create(con, NULL, "data", &appender);
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        // Parse CSV line (simplified)
+        int id;
+        char name[256];
+        double value;
+
+        if (sscanf(line, "%d,%255[^,],%lf", &id, name, &value) == 3) {
+            duckdb_append_int32(appender, id);
+            duckdb_append_varchar(appender, name);
+            duckdb_append_double(appender, value);
+            duckdb_appender_end_row(appender);
+        }
+    }
+
+    duckdb_appender_close(appender);
+    fclose(f);
+}
+```
+
+<Note>
+For CSV files, consider using DuckDB's built-in `COPY FROM` or `read_csv()` functions, which are optimized for CSV parsing.
+</Note>
+
+## Comparison: INSERT vs Appender
+
+<Tabs>
+  <Tab title="INSERT (Slow)">
+
+```c
+// Slow: 1000 individual INSERT statements
+for (int i = 0; i < 1000; i++) {
+    char query[256];
+    sprintf(query, "INSERT INTO test VALUES (%d, 'name%d', %f)", i, i, i * 1.5);
+    duckdb_query(con, query, NULL);
+}
+// Time: ~1-2 seconds
+```
+
+  </Tab>
+  <Tab title="Appender (Fast)">
+
+```c
+// Fast: Bulk append
+duckdb_appender appender;
+duckdb_appender_create(con, NULL, "test", &appender);
+
+for (int i = 0; i < 1000; i++) {
+    char name[32];
+    sprintf(name, "name%d", i);
+    duckdb_append_int32(appender, i);
+    duckdb_append_varchar(appender, name);
+    duckdb_append_double(appender, i * 1.5);
+    duckdb_appender_end_row(appender);
+}
+
+duckdb_appender_close(appender);
+// Time: ~10-50 milliseconds
+```
+
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Types" icon="table" href="/api/c/data-types">
+    Learn about all supported data types
+  </Card>
+  <Card title="C Examples" icon="code" href="/api/examples/c-examples">
+    See complete working examples
+  </Card>
+</CardGroup>

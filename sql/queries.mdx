@@ -1,0 +1,460 @@
+---
+title: Query Syntax and Examples
+description: Comprehensive guide to DuckDB query syntax including SELECT, WHERE, GROUP BY, ORDER BY, and CTEs
+---
+
+DuckDB provides a rich SQL query syntax that supports standard SQL operations along with advanced features like CTEs, subqueries, and analytical operations.
+
+## SELECT Statement
+
+The SELECT statement is the foundation of data retrieval in DuckDB.
+
+### Basic SELECT
+
+<CodeGroup>
+```sql Simple SELECT
+SELECT * FROM test;
+```
+
+```sql Column Selection
+SELECT a, b, c FROM test;
+```
+
+```sql With Expressions
+SELECT 
+  a,
+  b + 10 AS adjusted_b,
+  UPPER(c) AS uppercase_c
+FROM test;
+```
+</CodeGroup>
+
+### SELECT DISTINCT
+
+Remove duplicate rows from results:
+
+```sql
+SELECT DISTINCT depname FROM empsalary;
+
+SELECT DISTINCT depname, empno FROM empsalary;
+```
+
+### SELECT with Aggregates
+
+```sql
+SELECT 
+  COUNT(*) AS total_count,
+  SUM(a) AS sum_a,
+  AVG(a) AS avg_a
+FROM test;
+```
+
+## WHERE Clause
+
+Filter rows based on conditions:
+
+<CodeGroup>
+```sql Basic Filtering
+SELECT * FROM test WHERE a > 100;
+```
+
+```sql Multiple Conditions
+SELECT * FROM test 
+WHERE a > 100 
+  AND b < 200 
+  OR c = 'special';
+```
+
+```sql NULL Handling
+SELECT * FROM integers 
+WHERE i IS NOT NULL;
+```
+</CodeGroup>
+
+### WHERE with Subqueries
+
+```sql
+SELECT * FROM test 
+WHERE a IN (
+  SELECT i FROM integers WHERE i > 10
+);
+
+SELECT * FROM test
+WHERE a > (SELECT AVG(i) FROM integers);
+```
+
+## GROUP BY Clause
+
+Group rows by one or more columns and compute aggregates:
+
+<CodeGroup>
+```sql Basic GROUP BY
+SELECT 
+  b, 
+  SUM(a) AS sum_a, 
+  COUNT(*) AS count
+FROM test 
+GROUP BY b 
+ORDER BY b;
+```
+
+```sql Multiple Columns
+SELECT 
+  depname, 
+  enroll_date,
+  AVG(salary) AS avg_salary
+FROM empsalary 
+GROUP BY depname, enroll_date;
+```
+
+```sql GROUP BY ALL
+-- Automatically groups by all non-aggregate columns
+SELECT 
+  depname, 
+  empno, 
+  AVG(salary)
+FROM empsalary 
+GROUP BY ALL;
+```
+</CodeGroup>
+
+### GROUP BY with Expressions
+
+You can group by expressions and use column aliases:
+
+```sql
+SELECT 
+  b % 2 AS f, 
+  SUM(a) AS total
+FROM test 
+GROUP BY f 
+ORDER BY f;
+
+SELECT 
+  DATE_TRUNC('month', order_date) AS month,
+  SUM(amount) AS monthly_total
+FROM sales
+GROUP BY month
+ORDER BY month;
+```
+
+### HAVING Clause
+
+Filter groups after aggregation:
+
+```sql
+SELECT 
+  depname, 
+  AVG(salary) AS avg_salary
+FROM empsalary
+GROUP BY depname
+HAVING AVG(salary) > 4000;
+```
+
+## ORDER BY Clause
+
+Sort query results:
+
+<CodeGroup>
+```sql Ascending Order
+SELECT * FROM test ORDER BY a;
+```
+
+```sql Descending Order
+SELECT * FROM test ORDER BY a DESC;
+```
+
+```sql Multiple Columns
+SELECT * FROM empsalary 
+ORDER BY depname, empno DESC;
+```
+
+```sql Order by Expression
+SELECT a, b 
+FROM test 
+ORDER BY a + b DESC;
+```
+</CodeGroup>
+
+### NULL Ordering
+
+Control where NULL values appear:
+
+```sql
+SELECT * FROM integers 
+ORDER BY i NULLS FIRST;
+
+SELECT * FROM integers 
+ORDER BY i NULLS LAST;
+```
+
+### ORDER BY with Aggregates
+
+Order by aggregates that don't appear in SELECT:
+
+```sql
+SELECT b, SUM(a) AS sum_a
+FROM test 
+GROUP BY b 
+ORDER BY COUNT(a) DESC;
+```
+
+## Common Table Expressions (CTEs)
+
+CTEs provide a way to write auxiliary statements for use in a larger query.
+
+### Basic CTE
+
+<CodeGroup>
+```sql Simple CTE
+WITH cte1 AS (
+  SELECT i AS j FROM a
+)
+SELECT * FROM cte1;
+```
+
+```sql Named Columns
+WITH cte1(xxx) AS (
+  SELECT i AS j FROM a
+)
+SELECT xxx FROM cte1;
+```
+
+```sql CTE with Alias
+WITH cte1 AS (
+  SELECT i AS j FROM a
+)
+SELECT x FROM cte1 AS t1(x);
+```
+</CodeGroup>
+
+### Multiple CTEs
+
+Chain multiple CTEs together:
+
+```sql
+WITH 
+  cte1 AS (
+    SELECT i AS j FROM a
+  ),
+  cte2 AS (
+    SELECT ref.j AS k FROM cte1 AS ref
+  ),
+  cte3 AS (
+    SELECT ref2.j + 1 AS i FROM cte1 AS ref2
+  )
+SELECT * FROM cte2, cte3;
+```
+
+### CTE with Aggregates
+
+```sql
+WITH dept_avg AS (
+  SELECT 
+    depname,
+    AVG(salary) AS avg_salary
+  FROM empsalary
+  GROUP BY depname
+)
+SELECT 
+  e.depname,
+  e.empno,
+  e.salary,
+  d.avg_salary
+FROM empsalary e
+JOIN dept_avg d ON e.depname = d.depname
+WHERE e.salary > d.avg_salary;
+```
+
+### Recursive CTEs
+
+Generate sequences or traverse hierarchical data:
+
+```sql
+WITH RECURSIVE t AS (
+  SELECT 1 AS a
+  UNION ALL
+  SELECT a + 1
+  FROM t
+  WHERE a < 10
+)
+SELECT * FROM t;
+```
+
+<Note>
+Recursive CTEs must have a base case (anchor) and a recursive part joined with UNION ALL.
+</Note>
+
+### Reusing CTEs
+
+CTEs can be referenced multiple times:
+
+```sql
+WITH cte1 AS (
+  SELECT i AS j FROM a
+)
+SELECT * FROM cte1 cte11, cte1 cte12;
+
+-- CTE in subquery
+WITH cte1 AS (
+  SELECT i AS j FROM a
+)
+SELECT * FROM cte1 
+WHERE j = (SELECT MAX(j) FROM cte1 AS cte2);
+```
+
+## Nested Subqueries
+
+DuckDB supports arbitrary nested subqueries:
+
+<CodeGroup>
+```sql Scalar Subquery
+SELECT 
+  a,
+  (SELECT AVG(i) FROM integers) AS avg_i,
+  b
+FROM test;
+```
+
+```sql Correlated Subquery
+SELECT a, test.b, c 
+FROM test, test2 
+WHERE test.b = test2.b;
+
+SELECT 
+  a, 
+  (SELECT test.a) AS correlated, 
+  c 
+FROM test, test2 
+WHERE test.b = test2.b;
+```
+
+```sql EXISTS
+SELECT * FROM test
+WHERE EXISTS (
+  SELECT 1 FROM integers WHERE integers.i = test.a
+);
+```
+</CodeGroup>
+
+## LIMIT and OFFSET
+
+Limit the number of rows returned:
+
+```sql
+-- First 10 rows
+SELECT * FROM test LIMIT 10;
+
+-- Skip 20 rows, return next 10
+SELECT * FROM test LIMIT 10 OFFSET 20;
+
+-- Alternative syntax
+SELECT * FROM test OFFSET 20 LIMIT 10;
+```
+
+## UNION Operations
+
+Combine results from multiple queries:
+
+<CodeGroup>
+```sql UNION ALL
+SELECT a FROM test WHERE a < 100
+UNION ALL
+SELECT a FROM test WHERE a > 200;
+```
+
+```sql UNION (Distinct)
+SELECT depname FROM empsalary
+UNION
+SELECT depname FROM departments;
+```
+
+```sql UNION BY NAME
+SELECT name, age, email FROM users1
+UNION BY NAME
+SELECT email, name, age FROM users2;
+```
+</CodeGroup>
+
+## VALUES Clause
+
+Generate rows without a table:
+
+```sql
+-- Simple values
+SELECT * FROM (VALUES (1), (2), (3)) AS t(i);
+
+-- Multiple columns
+SELECT * FROM (
+  VALUES 
+    (1, 'alice', 'alice@email.com'),
+    (2, 'bob', 'bob@email.com'),
+    (3, 'charlie', 'charlie@email.com')
+) AS users(id, name, email);
+```
+
+## CASE Expressions
+
+Conditional logic in queries:
+
+```sql
+SELECT 
+  empno,
+  salary,
+  CASE 
+    WHEN salary < 4000 THEN 'Low'
+    WHEN salary < 5000 THEN 'Medium'
+    ELSE 'High'
+  END AS salary_bracket
+FROM empsalary;
+
+-- Simple CASE
+SELECT
+  CASE depname
+    WHEN 'develop' THEN 'Engineering'
+    WHEN 'sales' THEN 'Sales'
+    ELSE 'Other'
+  END AS dept_category
+FROM empsalary;
+```
+
+## Complex Query Example
+
+Putting it all together:
+
+```sql
+WITH 
+  dept_stats AS (
+    SELECT 
+      depname,
+      COUNT(*) AS emp_count,
+      AVG(salary) AS avg_salary,
+      MAX(salary) AS max_salary
+    FROM empsalary
+    GROUP BY depname
+  ),
+  high_earners AS (
+    SELECT 
+      e.depname,
+      e.empno,
+      e.salary,
+      e.enroll_date
+    FROM empsalary e
+    JOIN dept_stats d ON e.depname = d.depname
+    WHERE e.salary > d.avg_salary
+  )
+SELECT 
+  h.depname,
+  h.empno,
+  h.salary,
+  d.avg_salary,
+  h.salary - d.avg_salary AS above_avg,
+  ROUND(100.0 * h.salary / d.max_salary, 2) AS pct_of_max
+FROM high_earners h
+JOIN dept_stats d ON h.depname = d.depname
+ORDER BY h.depname, h.salary DESC;
+```
+
+<Tip>
+Use CTEs to break complex queries into readable, maintainable parts. DuckDB's optimizer will still generate efficient execution plans.
+</Tip>

@@ -1,0 +1,211 @@
+---
+title: C API Examples
+description: Complete examples for using DuckDB's C API
+---
+
+# C API Examples
+
+This guide provides a complete, runnable example of using DuckDB's C API to create tables, insert data, and query results.
+
+## Prerequisites
+
+To use the C API, you need:
+- The DuckDB C library (`libduckdb`)
+- Header file `duckdb.h`
+- A C compiler (gcc, clang, or MSVC)
+
+## Complete Example
+
+Here's a complete example demonstrating the core functionality of DuckDB's C API:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+	duckdb_database db = NULL;
+	duckdb_connection con = NULL;
+	duckdb_result result;
+
+	if (duckdb_open(NULL, &db) == DuckDBError) {
+		fprintf(stderr, "Failed to open database\n");
+		goto cleanup;
+	}
+	if (duckdb_connect(db, &con) == DuckDBError) {
+		fprintf(stderr, "Failed to open connection\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "CREATE TABLE integers(i INTEGER, j INTEGER);", NULL) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "INSERT INTO integers VALUES (3, 4), (5, 6), (7, NULL);", NULL) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	if (duckdb_query(con, "SELECT * FROM integers", &result) == DuckDBError) {
+		fprintf(stderr, "Failed to query database\n");
+		goto cleanup;
+	}
+	// print the names of the result
+	idx_t row_count = duckdb_row_count(&result);
+	idx_t column_count = duckdb_column_count(&result);
+	for (size_t i = 0; i < column_count; i++) {
+		printf("%s ", duckdb_column_name(&result, i));
+	}
+	printf("\n");
+	// print the data of the result
+	for (size_t row_idx = 0; row_idx < row_count; row_idx++) {
+		for (size_t col_idx = 0; col_idx < column_count; col_idx++) {
+			char *val = duckdb_value_varchar(&result, col_idx, row_idx);
+			printf("%s ", val);
+			duckdb_free(val);
+		}
+		printf("\n");
+	}
+	// duckdb_print_result(result);
+cleanup:
+	duckdb_destroy_result(&result);
+	duckdb_disconnect(&con);
+	duckdb_close(&db);
+}
+```
+
+## Step-by-Step Explanation
+
+### 1. Opening a Database
+
+```c
+duckdb_database db = NULL;
+if (duckdb_open(NULL, &db) == DuckDBError) {
+    fprintf(stderr, "Failed to open database\n");
+    goto cleanup;
+}
+```
+
+- `duckdb_open(NULL, &db)` creates an **in-memory database**
+- To use a persistent database, pass a file path instead of `NULL`
+- Always check the return value for `DuckDBError`
+
+### 2. Creating a Connection
+
+```c
+duckdb_connection con = NULL;
+if (duckdb_connect(db, &con) == DuckDBError) {
+    fprintf(stderr, "Failed to open connection\n");
+    goto cleanup;
+}
+```
+
+- A connection is required to execute queries
+- Multiple connections can be created from a single database
+
+### 3. Executing Queries
+
+```c
+if (duckdb_query(con, "CREATE TABLE integers(i INTEGER, j INTEGER);", NULL) == DuckDBError) {
+    fprintf(stderr, "Failed to query database\n");
+    goto cleanup;
+}
+```
+
+- `duckdb_query()` executes SQL statements
+- Pass `NULL` as the third parameter if you don't need results
+- For SELECT queries, pass a pointer to `duckdb_result` to retrieve data
+
+### 4. Retrieving Results
+
+```c
+duckdb_result result;
+if (duckdb_query(con, "SELECT * FROM integers", &result) == DuckDBError) {
+    fprintf(stderr, "Failed to query database\n");
+    goto cleanup;
+}
+
+idx_t row_count = duckdb_row_count(&result);
+idx_t column_count = duckdb_column_count(&result);
+```
+
+- `duckdb_row_count()` and `duckdb_column_count()` get result dimensions
+- `duckdb_column_name()` retrieves column names
+
+### 5. Extracting Values
+
+```c
+for (size_t row_idx = 0; row_idx < row_count; row_idx++) {
+    for (size_t col_idx = 0; col_idx < column_count; col_idx++) {
+        char *val = duckdb_value_varchar(&result, col_idx, row_idx);
+        printf("%s ", val);
+        duckdb_free(val);
+    }
+    printf("\n");
+}
+```
+
+- `duckdb_value_varchar()` converts any value to a string
+- **Important**: Always call `duckdb_free()` on returned strings to avoid memory leaks
+- Type-specific functions are also available: `duckdb_value_int32()`, `duckdb_value_double()`, etc.
+
+### 6. Cleanup
+
+```c
+cleanup:
+    duckdb_destroy_result(&result);
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+```
+
+- Always clean up resources in reverse order of creation
+- `duckdb_destroy_result()` frees result memory
+- `duckdb_disconnect()` closes the connection
+- `duckdb_close()` closes the database
+
+## Compilation
+
+### Using GCC
+
+```bash
+gcc -o duckdb_example main.c -lduckdb
+./duckdb_example
+```
+
+### Using CMake
+
+Create a `CMakeLists.txt`:
+
+```cmake
+cmake_minimum_required(VERSION 3.10)
+project(DuckDBExample)
+
+find_library(DUCKDB_LIB duckdb)
+find_path(DUCKDB_INCLUDE duckdb.h)
+
+add_executable(duckdb_example main.c)
+target_include_directories(duckdb_example PRIVATE ${DUCKDB_INCLUDE})
+target_link_libraries(duckdb_example ${DUCKDB_LIB})
+```
+
+Build and run:
+
+```bash
+mkdir build
+cd build
+cmake ..
+make
+./duckdb_example
+```
+
+## Expected Output
+
+```
+i j 
+3 4 
+5 6 
+7 NULL 
+```
+
+## Additional Resources
+
+- [C API Reference](/api/c/overview)
+- [Data Types in C API](/api/c/types)
+- [Prepared Statements](/api/c/prepared)

@@ -1,0 +1,274 @@
+---
+title: C++ API Examples
+description: Complete examples for using DuckDB's C++ API
+---
+
+# C++ API Examples
+
+This guide demonstrates how to use DuckDB's native C++ API, which provides a clean, modern interface for embedded analytics.
+
+## Prerequisites
+
+To use the C++ API, you need:
+- The DuckDB C++ library
+- Header file `duckdb.hpp`
+- A C++11 or later compiler
+
+## Complete Example
+
+Here's a complete, minimal example using DuckDB's C++ API:
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+	DuckDB db(nullptr);
+
+	Connection con(db);
+
+	con.Query("CREATE TABLE integers(i INTEGER)");
+	con.Query("INSERT INTO integers VALUES (3)");
+	auto result = con.Query("SELECT * FROM integers");
+	result->Print();
+}
+```
+
+## Step-by-Step Explanation
+
+### 1. Creating a Database
+
+```cpp
+DuckDB db(nullptr);
+```
+
+- Passing `nullptr` creates an **in-memory database**
+- For a persistent database, pass a file path: `DuckDB db("/path/to/database.db")`
+- The `DuckDB` object manages the database lifecycle
+
+### 2. Creating a Connection
+
+```cpp
+Connection con(db);
+```
+
+- A `Connection` object is used to execute queries
+- Multiple connections can be created from a single database
+- Each connection can be used from a single thread
+
+### 3. Executing Queries
+
+```cpp
+con.Query("CREATE TABLE integers(i INTEGER)");
+con.Query("INSERT INTO integers VALUES (3)");
+```
+
+- `Query()` executes SQL statements and returns results
+- For DDL/DML statements where you don't need results, you can ignore the return value
+- The method automatically manages query execution and error handling
+
+### 4. Retrieving and Printing Results
+
+```cpp
+auto result = con.Query("SELECT * FROM integers");
+result->Print();
+```
+
+- `Query()` returns a `unique_ptr<QueryResult>`
+- `Print()` outputs the result set in a formatted table
+- For programmatic access, use methods like `Fetch()`, `FetchRow()`, or convert to Arrow format
+
+## More Advanced Example
+
+Here's a more comprehensive example showing data insertion and result processing:
+
+```cpp
+#include "duckdb.hpp"
+#include <iostream>
+
+using namespace duckdb;
+
+int main() {
+    // Create in-memory database
+    DuckDB db(nullptr);
+    Connection con(db);
+
+    // Create table
+    con.Query("CREATE TABLE users(id INTEGER, name VARCHAR, age INTEGER)");
+
+    // Insert data
+    con.Query("INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35)");
+
+    // Query and process results
+    auto result = con.Query("SELECT * FROM users WHERE age > 25");
+
+    // Check for errors
+    if (result->HasError()) {
+        std::cerr << "Query error: " << result->GetError() << std::endl;
+        return 1;
+    }
+
+    // Print results
+    result->Print();
+
+    // Access individual values
+    auto chunk = result->Fetch();
+    if (chunk) {
+        std::cout << "\nFirst result row:\n";
+        std::cout << "ID: " << chunk->GetValue(0, 0).ToString() << std::endl;
+        std::cout << "Name: " << chunk->GetValue(1, 0).ToString() << std::endl;
+        std::cout << "Age: " << chunk->GetValue(2, 0).ToString() << std::endl;
+    }
+
+    return 0;
+}
+```
+
+## Working with Different Data Types
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    DuckDB db(nullptr);
+    Connection con(db);
+
+    // Create table with various types
+    con.Query("CREATE TABLE example("
+              "id INTEGER, "
+              "price DOUBLE, "
+              "name VARCHAR, "
+              "active BOOLEAN, "
+              "created TIMESTAMP)");
+
+    // Insert data
+    con.Query("INSERT INTO example VALUES "
+              "(1, 19.99, 'Product A', true, '2024-01-15 10:30:00'), "
+              "(2, 29.99, 'Product B', false, '2024-02-20 14:45:00')");
+
+    // Query results
+    auto result = con.Query("SELECT * FROM example");
+    result->Print();
+
+    return 0;
+}
+```
+
+## Prepared Statements
+
+For better performance and security when executing similar queries multiple times:
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    DuckDB db(nullptr);
+    Connection con(db);
+
+    con.Query("CREATE TABLE test(id INTEGER, value VARCHAR)");
+
+    // Prepare statement
+    auto prepared = con.Prepare("INSERT INTO test VALUES ($1, $2)");
+
+    // Execute with different parameters
+    prepared->Execute(1, "first")->Print();
+    prepared->Execute(2, "second")->Print();
+    prepared->Execute(3, "third")->Print();
+
+    // Verify
+    con.Query("SELECT * FROM test")->Print();
+
+    return 0;
+}
+```
+
+## Compilation
+
+### Using G++
+
+```bash
+g++ -std=c++11 -o duckdb_example main.cpp -lduckdb
+./duckdb_example
+```
+
+### Using CMake
+
+Create a `CMakeLists.txt`:
+
+```cmake
+cmake_minimum_required(VERSION 3.10)
+project(DuckDBCppExample)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_library(DUCKDB_LIB duckdb)
+find_path(DUCKDB_INCLUDE duckdb.hpp)
+
+add_executable(duckdb_example main.cpp)
+target_include_directories(duckdb_example PRIVATE ${DUCKDB_INCLUDE})
+target_link_libraries(duckdb_example ${DUCKDB_LIB})
+```
+
+Build and run:
+
+```bash
+mkdir build
+cd build
+cmake ..
+make
+./duckdb_example
+```
+
+### Using Clang
+
+```bash
+clang++ -std=c++11 -o duckdb_example main.cpp -lduckdb
+./duckdb_example
+```
+
+## Expected Output
+
+For the basic example:
+
+```
+┌───────┐
+│   i   │
+│ int32 │
+├───────┤
+│     3 │
+└───────┘
+```
+
+## Error Handling
+
+Always check for errors when executing queries:
+
+```cpp
+auto result = con.Query("SELECT * FROM nonexistent_table");
+
+if (result->HasError()) {
+    std::cerr << "Error: " << result->GetError() << std::endl;
+    return 1;
+}
+```
+
+## Key Advantages of the C++ API
+
+- **RAII**: Automatic resource management through destructors
+- **Type Safety**: Compile-time type checking
+- **Modern C++**: Use of smart pointers, move semantics, and templates
+- **Cleaner Code**: Less boilerplate compared to the C API
+- **Exception Safety**: Proper exception handling support
+
+## Additional Resources
+
+- [C++ API Reference](/api/cpp/overview)
+- [Data Types in C++](/api/cpp/types)
+- [Appender API](/api/cpp/appender)
+- [Arrow Integration](/api/cpp/arrow)

@@ -1,0 +1,365 @@
+---
+title: SQL Commands
+description: Common SQL commands in the DuckDB CLI
+---
+
+The DuckDB CLI supports standard SQL commands for data definition, manipulation, and querying.
+
+## Data Definition Language (DDL)
+
+### CREATE TABLE
+
+Create a new table:
+
+```sql
+CREATE TABLE employees (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    department VARCHAR,
+    salary DECIMAL(10,2),
+    hire_date DATE
+);
+```
+
+Create a table from a query:
+
+```sql
+CREATE TABLE high_earners AS 
+SELECT * FROM employees 
+WHERE salary > 100000;
+```
+
+### CREATE VIEW
+
+Create a view:
+
+```sql
+CREATE VIEW employee_summary AS
+SELECT department, COUNT(*) as emp_count, AVG(salary) as avg_salary
+FROM employees
+GROUP BY department;
+```
+
+### CREATE INDEX
+
+Create an index:
+
+```sql
+CREATE INDEX idx_department ON employees(department);
+```
+
+### DROP TABLE
+
+Drop a table:
+
+```sql
+DROP TABLE employees;
+```
+
+Drop if exists:
+
+```sql
+DROP TABLE IF EXISTS employees;
+```
+
+### ALTER TABLE
+
+Add a column:
+
+```sql
+ALTER TABLE employees ADD COLUMN email VARCHAR;
+```
+
+Drop a column:
+
+```sql
+ALTER TABLE employees DROP COLUMN email;
+```
+
+## Data Manipulation Language (DML)
+
+### INSERT
+
+Insert single row:
+
+```sql
+INSERT INTO employees VALUES (1, 'Alice Smith', 'Engineering', 95000, '2020-01-15');
+```
+
+Insert multiple rows:
+
+```sql
+INSERT INTO employees VALUES 
+    (2, 'Bob Johnson', 'Sales', 75000, '2019-03-20'),
+    (3, 'Carol Williams', 'Engineering', 105000, '2018-07-10'),
+    (4, 'David Brown', 'Marketing', 68000, '2021-02-01');
+```
+
+Insert from a query:
+
+```sql
+INSERT INTO high_earners 
+SELECT * FROM employees WHERE salary > 100000;
+```
+
+### UPDATE
+
+Update rows:
+
+```sql
+UPDATE employees 
+SET salary = salary * 1.1 
+WHERE department = 'Engineering';
+```
+
+Update with conditions:
+
+```sql
+UPDATE employees 
+SET department = 'Technology' 
+WHERE department = 'Engineering' AND hire_date < '2020-01-01';
+```
+
+### DELETE
+
+Delete rows:
+
+```sql
+DELETE FROM employees WHERE hire_date < '2015-01-01';
+```
+
+Delete all rows:
+
+```sql
+DELETE FROM employees;
+```
+
+## Data Query Language (DQL)
+
+### SELECT
+
+Basic select:
+
+```sql
+SELECT * FROM employees;
+```
+
+Select specific columns:
+
+```sql
+SELECT name, department, salary FROM employees;
+```
+
+With WHERE clause:
+
+```sql
+SELECT name, salary 
+FROM employees 
+WHERE department = 'Engineering' AND salary > 90000;
+```
+
+### Aggregations
+
+Group by with aggregates:
+
+```sql
+SELECT 
+    department,
+    COUNT(*) as employee_count,
+    AVG(salary) as avg_salary,
+    MAX(salary) as max_salary,
+    MIN(salary) as min_salary
+FROM employees
+GROUP BY department;
+```
+
+Having clause:
+
+```sql
+SELECT department, AVG(salary) as avg_salary
+FROM employees
+GROUP BY department
+HAVING AVG(salary) > 80000;
+```
+
+### Joins
+
+Inner join:
+
+```sql
+SELECT e.name, e.salary, d.department_name
+FROM employees e
+INNER JOIN departments d ON e.department = d.dept_code;
+```
+
+Left join:
+
+```sql
+SELECT e.name, e.salary, d.department_name
+FROM employees e
+LEFT JOIN departments d ON e.department = d.dept_code;
+```
+
+### Order By
+
+Order results:
+
+```sql
+SELECT name, salary 
+FROM employees 
+ORDER BY salary DESC;
+```
+
+Multiple columns:
+
+```sql
+SELECT name, department, salary
+FROM employees
+ORDER BY department ASC, salary DESC;
+```
+
+### Limit
+
+Limit results:
+
+```sql
+SELECT name, salary 
+FROM employees 
+ORDER BY salary DESC 
+LIMIT 10;
+```
+
+With offset:
+
+```sql
+SELECT name, salary 
+FROM employees 
+ORDER BY salary DESC 
+LIMIT 10 OFFSET 20;
+```
+
+## Common Table Expressions (CTEs)
+
+Use WITH for CTEs:
+
+```sql
+WITH high_earners AS (
+    SELECT * FROM employees WHERE salary > 100000
+),
+average_by_dept AS (
+    SELECT department, AVG(salary) as avg_sal
+    FROM employees
+    GROUP BY department
+)
+SELECT h.name, h.salary, a.avg_sal
+FROM high_earners h
+JOIN average_by_dept a ON h.department = a.department;
+```
+
+## Window Functions
+
+Ranking:
+
+```sql
+SELECT 
+    name,
+    department,
+    salary,
+    RANK() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank
+FROM employees;
+```
+
+Running totals:
+
+```sql
+SELECT 
+    name,
+    salary,
+    SUM(salary) OVER (ORDER BY hire_date) as running_total
+FROM employees;
+```
+
+## Transaction Commands
+
+### BEGIN TRANSACTION
+
+Start a transaction:
+
+```sql
+BEGIN TRANSACTION;
+```
+
+or simply:
+
+```sql
+BEGIN;
+```
+
+### COMMIT
+
+Commit changes:
+
+```sql
+COMMIT;
+```
+
+### ROLLBACK
+
+Rollback changes:
+
+```sql
+ROLLBACK;
+```
+
+### Transaction Example
+
+```sql
+BEGIN TRANSACTION;
+
+UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering';
+INSERT INTO salary_changes VALUES ('2024-01-01', 'Engineering raise', 10.0);
+
+COMMIT;
+```
+
+Rollback on error:
+
+```sql
+BEGIN TRANSACTION;
+
+UPDATE employees SET salary = salary * 1.1 WHERE department = 'Engineering';
+-- Oops, made a mistake
+ROLLBACK;
+```
+
+## Utility Commands
+
+### DESCRIBE
+
+Show table structure:
+
+```sql
+DESCRIBE employees;
+```
+
+### SHOW TABLES
+
+List all tables:
+
+```sql
+SHOW TABLES;
+```
+
+### EXPLAIN
+
+Show query plan:
+
+```sql
+EXPLAIN SELECT * FROM employees WHERE salary > 100000;
+```
+
+Detailed analysis:
+
+```sql
+EXPLAIN ANALYZE SELECT * FROM employees WHERE salary > 100000;
+```

@@ -1,0 +1,311 @@
+---
+title: Query Optimization
+description: Understanding DuckDB's query optimization techniques and strategies
+---
+
+DuckDB employs a comprehensive query optimizer that transforms logical query plans into efficient physical execution plans through multiple optimization passes.
+
+## Optimizer Architecture
+
+The optimizer is implemented in `src/optimizer/optimizer.cpp` and applies a series of transformation rules in a specific order. Each optimization pass can be individually enabled or disabled through configuration.
+
+### Optimization Phases
+
+DuckDB's optimizer runs the following key optimization passes:
+
+1. **Expression Rewriting** - Simplifies expression trees without changing plan structure
+2. **Filter Pushdown** - Moves filter predicates closer to data sources
+3. **Join Ordering** - Determines optimal join order using cost-based optimization
+4. **Statistics Propagation** - Propagates column statistics through the query plan
+5. **Column Pruning** - Removes unused columns early in execution
+6. **Common Subexpression Elimination** - Eliminates redundant computations
+
+## Using EXPLAIN
+
+The `EXPLAIN` command shows how DuckDB will execute your query:
+
+```sql
+EXPLAIN SELECT * FROM customers WHERE age > 25;
+```
+
+For detailed execution statistics, use `EXPLAIN ANALYZE`:
+
+```sql
+EXPLAIN ANALYZE SELECT 
+    c.name, 
+    COUNT(*) as order_count
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+WHERE c.age > 25
+GROUP BY c.name;
+```
+
+This executes the query and shows:
+- Actual execution time for each operator
+- Number of rows processed
+- Memory usage
+- Chosen physical operators
+
+## Expression Rewriting Rules
+
+DuckDB applies numerous expression simplification rules (see `src/optimizer/rule/`):
+
+### Constant Folding
+
+Evaluates constant expressions at optimization time:
+
+```sql
+-- Original query
+SELECT * FROM table WHERE price * 1.15 > 100;
+
+-- Optimized to
+SELECT * FROM table WHERE price > 86.956...
+```
+
+Implementation: `src/optimizer/rule/constant_folding.cpp`
+
+### Arithmetic Simplification
+
+Simplifies arithmetic expressions:
+
+```sql
+-- x + 0 → x
+-- x * 1 → x  
+-- x * 0 → 0
+```
+
+Implementation: `src/optimizer/rule/arithmetic_simplification.cpp`
+
+### Conjunction Simplification
+
+Simplifies boolean expressions:
+
+```sql
+-- x AND TRUE → x
+-- x OR FALSE → x
+-- x AND FALSE → FALSE
+```
+
+Implementation: `src/optimizer/rule/conjunction_simplification.cpp`
+
+### Comparison Simplification
+
+Optimizes comparison operations:
+
+```sql
+-- x = x → TRUE (if x is NOT NULL)
+-- x > x → FALSE
+```
+
+Implementation: `src/optimizer/rule/comparison_simplification.cpp`
+
+### LIKE Optimizations
+
+Converts LIKE patterns to more efficient operations:
+
+```sql
+-- LIKE 'prefix%' → starts_with('prefix')
+-- LIKE '%suffix' → ends_with('suffix')
+-- LIKE 'exact' → equals('exact')
+```
+
+Implementation: `src/optimizer/rule/like_optimizations.cpp`
+
+## Filter Optimization
+
+### Filter Pushdown
+
+The filter pushdown optimizer (`src/optimizer/filter_pushdown.cpp`) moves filter predicates as close to the data source as possible:
+
+```sql
+SELECT * FROM (
+    SELECT * FROM large_table
+) t
+WHERE t.category = 'electronics';
+```
+
+The optimizer pushes the filter into the subquery, reducing rows early:
+
+```sql
+SELECT * FROM large_table
+WHERE category = 'electronics';
+```
+
+### Filter Pullup
+
+Filter pullup (`src/optimizer/filter_pullup.cpp`) extracts filters from subqueries when beneficial:
+
+```sql
+SELECT * FROM (
+    SELECT * FROM t1 WHERE x > 10
+) JOIN t2 ON t1.id = t2.id
+WHERE t2.y > 20;
+```
+
+Filters may be pulled up to enable better join reordering.
+
+## Join Optimization
+
+### Cost-Based Join Ordering
+
+DuckDB uses dynamic programming to find optimal join orders (see `src/optimizer/join_order/`).
+
+The cost model (`src/optimizer/join_order/cost_model.cpp`) estimates join costs based on:
+- **Cardinality estimates** - Expected number of output rows
+- **Base relation sizes** - Statistics from table scans
+- **Join selectivity** - Estimated filtering effect of join predicates
+
+```cpp
+// From cost_model.cpp:21
+double CostModel::ComputeCost(DPJoinNode &left, DPJoinNode &right) {
+    auto &combination = query_graph_manager.set_manager.Union(left.set, right.set);
+    auto join_card = cardinality_estimator.EstimateCardinalityWithSet<double>(combination);
+    auto join_cost = join_card;
+    return join_cost + left.cost + right.cost;
+}
+```
+
+### Cardinality Estimation
+
+The cardinality estimator (`src/optimizer/join_order/cardinality_estimator.cpp`) uses:
+- Table statistics (row counts, distinct values)
+- Column histograms
+- Filter selectivity estimates
+- Join selectivity based on foreign key relationships
+
+### Join Elimination
+
+Removes unnecessary joins when possible:
+
+```sql
+-- If orders.customer_id is a foreign key to customers.id
+-- and no customer columns are used:
+SELECT o.order_date 
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Optimized to:
+SELECT o.order_date FROM orders o;
+```
+
+Implementation: `src/optimizer/join_elimination.cpp`
+
+## Statistics and Cost Estimation
+
+### Statistics Propagation
+
+The statistics propagator (`src/optimizer/statistics_propagator.cpp`) flows statistics through the query plan:
+
+```cpp
+// From statistics_propagator.cpp:23
+StatisticsPropagator::StatisticsPropagator(Optimizer &optimizer_p, LogicalOperator &root_p)
+    : optimizer(optimizer_p), context(optimizer.context), root(&root_p) {
+    root->ResolveOperatorTypes();
+}
+```
+
+Statistics include:
+- **Min/Max values** - Range of values in a column
+- **Null percentage** - Fraction of NULL values
+- **Distinct count** - Number of unique values
+- **Column correlation** - Relationships between columns
+
+### Using Statistics
+
+Statistics enable optimizations like:
+- **Filter elimination** - Removing always-true or always-false filters
+- **Join ordering** - Choosing smaller build sides
+- **Zone map pruning** - Skipping row groups (see [Indexing](/performance/indexing))
+
+## Advanced Optimizations
+
+### Common Subexpression Elimination (CSE)
+
+Eliminates duplicate expressions:
+
+```sql
+SELECT 
+    price * 1.15 as price_with_tax,
+    price * 1.15 * 0.9 as discounted_price
+FROM products;
+```
+
+The `price * 1.15` computation is performed only once.
+
+Implementation: `src/optimizer/cse_optimizer.cpp`
+
+### Top-N Optimization
+
+Converts ORDER BY + LIMIT into a more efficient Top-N heap operation:
+
+```sql
+SELECT * FROM large_table 
+ORDER BY score DESC 
+LIMIT 10;
+```
+
+Instead of sorting all rows, maintains a heap of only 10 elements.
+
+Implementation: `src/optimizer/topn_optimizer.cpp`
+
+### Limit Pushdown
+
+Pushes LIMIT operations down through projections and unions:
+
+```sql
+SELECT expensive_function(x) FROM (
+    SELECT * FROM large_table LIMIT 100
+);
+```
+
+The limit is enforced before the expensive function call.
+
+Implementation: `src/optimizer/limit_pushdown.cpp`
+
+### Unnest Rewriting
+
+Optimizes UNNEST operations by moving them to projections:
+
+Implementation: `src/optimizer/unnest_rewriter.cpp`
+
+### Late Materialization
+
+Delays fetching full row data until necessary, fetching only row IDs through filters and joins:
+
+Implementation: `src/optimizer/late_materialization.cpp`
+
+## Optimizer Configuration
+
+Disable specific optimizers for debugging:
+
+```sql
+SET disabled_optimizers='join_order';
+```
+
+Available optimizer types:
+- `expression_rewriter`
+- `filter_pushdown`
+- `filter_pullup`
+- `join_order`
+- `statistics_propagation`
+- `common_subexpressions`
+- `top_n`
+
+Re-enable all optimizers:
+
+```sql
+RESET disabled_optimizers;
+```
+
+## Performance Tips
+
+1. **Let the optimizer work** - Complex predicates are often optimized automatically
+2. **Use EXPLAIN ANALYZE** - Verify that filters are being pushed down
+3. **Check statistics** - Run `ANALYZE table_name` to update statistics
+4. **Avoid optimizer barriers** - Some functions prevent pushdown
+5. **Use appropriate types** - Implicit casts can prevent optimizations
+
+## See Also
+
+- [Indexing Strategies](/performance/indexing) - Using indexes and zone maps
+- [Performance Benchmarks](/performance/benchmarks) - Measuring query performance

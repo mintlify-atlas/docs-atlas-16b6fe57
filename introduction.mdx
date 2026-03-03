@@ -1,0 +1,117 @@
+---
+title: "What is DuckDB?"
+description: "DuckDB is a high-performance analytical database system designed to be fast, reliable, portable, and easy to use."
+---
+
+# What is DuckDB?
+
+DuckDB is a **high-performance analytical database system**. It is designed to be fast, reliable, portable, and easy to use. DuckDB provides a rich SQL dialect with support far beyond basic SQL, including arbitrary and nested correlated subqueries, window functions, collations, complex types (arrays, structs, maps), and several extensions designed to make SQL easier to use.
+
+## In-Process Analytics Engine
+
+Unlike traditional database systems that run as separate server processes, DuckDB is an **in-process** analytical database. This means it runs directly inside your application, eliminating network overhead and simplifying deployment. Think of it as "SQLite for analytics" - a powerful analytical engine that requires no separate installation or server management.
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install DuckDB CLI or embed it in your application
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get up and running with your first DuckDB query
+  </Card>
+  <Card title="SQL Reference" icon="book" href="https://duckdb.org/docs/stable/sql/introduction">
+    Learn about DuckDB's rich SQL dialect
+  </Card>
+  <Card title="API Reference" icon="code" href="https://duckdb.org/docs/stable/api/overview">
+    Explore client APIs for Python, R, Java, and more
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Rich SQL Dialect
+
+DuckDB supports a comprehensive SQL dialect with features that make complex analytical queries simple:
+
+- Arbitrary and nested correlated subqueries
+- Window functions for advanced analytics
+- Complex types: arrays, structs, and maps
+- Friendly SQL extensions for easier querying
+- Advanced aggregation and grouping operations
+
+### Built for Performance
+
+DuckDB is optimized for analytical workloads with:
+
+- Columnar storage for efficient analytics
+- Vectorized query execution engine
+- Parallel query processing
+- Advanced compression techniques
+- Zero-copy data integration
+
+### Seamless Data Import
+
+Query data directly from files without explicit import steps:
+
+```sql
+SELECT * FROM 'myfile.csv';
+SELECT * FROM 'myfile.parquet';
+```
+
+DuckDB supports CSV, Parquet, JSON, and many other formats out of the box.
+
+### Multiple Client Libraries
+
+DuckDB is available as:
+
+- **Standalone CLI application** for interactive queries
+- **Python client** with deep pandas integration
+- **R client** with dplyr support
+- **Java, Node.js, Rust, Go** and other language bindings
+- **WebAssembly** for in-browser analytics
+- **C/C++ embedded library** for direct integration
+
+### Extensible Architecture
+
+Extend DuckDB's functionality with:
+
+- Custom functions and aggregates
+- Loadable extensions for specialized features
+- Community-contributed extensions
+- Custom data sources and file formats
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Data Analysis" icon="chart-line">
+    Analyze large datasets directly in Python, R, or your favorite language without external database servers
+  </Card>
+  <Card title="ETL Pipelines" icon="arrows-spin">
+    Transform and load data with SQL while leveraging DuckDB's efficient processing engine
+  </Card>
+  <Card title="Embedded Analytics" icon="microchip">
+    Add powerful analytical capabilities directly into your application with minimal overhead
+  </Card>
+  <Card title="Data Science" icon="flask">
+    Query and transform data in notebooks with seamless integration to pandas and arrow
+  </Card>
+</CardGroup>
+
+## Why DuckDB?
+
+<Note>
+DuckDB combines the ease of SQLite (in-process, serverless) with the performance of modern analytical databases. It's perfect for analytical workloads that don't require a full client-server database setup.
+</Note>
+
+Key advantages:
+
+- **Zero configuration**: No server setup, no configuration files, just start querying
+- **Portable**: Single-file database format that works across platforms
+- **Fast**: Optimized for analytical queries with columnar storage and vectorized execution
+- **Standard SQL**: Use familiar SQL syntax with powerful analytical extensions
+- **Rich ecosystem**: Deep integrations with popular data science tools and frameworks
+
+## Next Steps
+
+Ready to get started? Head over to the [Installation](/installation) guide to set up DuckDB, or jump straight into the [Quick Start](/quickstart) to run your first queries.

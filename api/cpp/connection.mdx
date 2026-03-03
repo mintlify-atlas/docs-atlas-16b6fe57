@@ -1,0 +1,557 @@
+---
+title: Connection Class
+description: Database connection management and query execution in C++
+---
+
+## Overview
+
+The `Connection` class represents a client connection to a DuckDB database. It provides methods for executing queries, managing transactions, and creating prepared statements. Each connection maintains its own transaction context and can execute queries independently.
+
+Defined in: `duckdb/main/connection.hpp` (line 40)
+
+```cpp
+class Connection {
+public:
+    explicit Connection(DuckDB &database);
+    explicit Connection(DatabaseInstance &database);
+    Connection(Connection &&other) noexcept;  // moveable
+    ~Connection();
+    
+    shared_ptr<ClientContext> context;
+};
+```
+
+## Constructors
+
+### Database Constructor
+
+```cpp
+Connection(DuckDB &database)
+```
+
+Creates a new connection to a DuckDB database.
+
+<ParamField path="database" type="DuckDB&">
+  Reference to the database instance to connect to.
+</ParamField>
+
+**Example:**
+
+```cpp
+DuckDB db(nullptr);
+Connection con(db);
+```
+
+### DatabaseInstance Constructor
+
+```cpp
+Connection(DatabaseInstance &database)
+```
+
+Creates a connection directly from a `DatabaseInstance`.
+
+<ParamField path="database" type="DatabaseInstance&">
+  Reference to the database instance.
+</ParamField>
+
+### Move Constructor
+
+```cpp
+Connection(Connection &&other) noexcept
+```
+
+Connections support move semantics but cannot be copied.
+
+```cpp
+Connection con1(db);
+Connection con2(std::move(con1));  // OK
+// Connection con3(con2);  // Error: copy not allowed
+```
+
+## Query Execution
+
+### Query
+
+```cpp
+unique_ptr<MaterializedQueryResult> Query(const string &query)
+```
+
+Executes a query and materializes the complete result set in memory.
+
+<ParamField path="query" type="const string&">
+  SQL query string to execute.
+</ParamField>
+
+<ResponseField name="return" type="unique_ptr<MaterializedQueryResult>">
+  Materialized query result containing the complete result set.
+</ResponseField>
+
+**Example:**
+
+```cpp
+Connection con(db);
+auto result = con.Query("SELECT * FROM users WHERE age > 25");
+
+if (result->HasError()) {
+    std::cerr << "Error: " << result->GetError() << std::endl;
+} else {
+    result->Print();
+}
+```
+
+### Query with Statement
+
+```cpp
+unique_ptr<MaterializedQueryResult> Query(
+    unique_ptr<SQLStatement> statement,
+    QueryResultMemoryType memory_type = QueryResultMemoryType::IN_MEMORY
+)
+```
+
+Executes a pre-parsed SQL statement.
+
+<ParamField path="statement" type="unique_ptr<SQLStatement>">
+  Parsed SQL statement to execute.
+</ParamField>
+
+<ParamField path="memory_type" type="QueryResultMemoryType" default="IN_MEMORY">
+  Memory type for storing the result.
+</ParamField>
+
+### SendQuery
+
+```cpp
+unique_ptr<QueryResult> SendQuery(
+    const string &query,
+    QueryParameters query_parameters = QueryResultOutputType::ALLOW_STREAMING
+)
+```
+
+Executes a query and returns either a streaming or materialized result.
+
+<ParamField path="query" type="const string&">
+  SQL query string to execute.
+</ParamField>
+
+<ParamField path="query_parameters" type="QueryParameters" default="ALLOW_STREAMING">
+  Parameters controlling result type (streaming vs materialized).
+</ParamField>
+
+<ResponseField name="return" type="unique_ptr<QueryResult>">
+  Query result (either StreamQueryResult or MaterializedQueryResult).
+</ResponseField>
+
+**Example:**
+
+```cpp
+// Streaming result for large datasets
+auto result = con.SendQuery("SELECT * FROM large_table");
+
+while (auto chunk = result->Fetch()) {
+    // Process chunk incrementally
+    for (idx_t i = 0; i < chunk->size(); i++) {
+        // Process row i
+    }
+}
+```
+
+## Prepared Statements
+
+### Prepare
+
+```cpp
+unique_ptr<PreparedStatement> Prepare(const string &query)
+```
+
+Prepares a SQL statement for repeated execution with different parameters.
+
+<ParamField path="query" type="const string&">
+  SQL query with optional parameter placeholders ($1, $2, etc.).
+</ParamField>
+
+<ResponseField name="return" type="unique_ptr<PreparedStatement>">
+  Prepared statement object that can be executed multiple times.
+</ResponseField>
+
+**Example:**
+
+```cpp
+Connection con(db);
+
+// Prepare a statement
+auto stmt = con.Prepare("INSERT INTO users VALUES ($1, $2)");
+
+// Execute with different parameters
+stmt->Execute("Alice", 30);
+stmt->Execute("Bob", 25);
+stmt->Execute("Charlie", 35);
+```
+
+### Prepare with Statement
+
+```cpp
+unique_ptr<PreparedStatement> Prepare(unique_ptr<SQLStatement> statement)
+```
+
+Prepares a pre-parsed SQL statement.
+
+<ParamField path="statement" type="unique_ptr<SQLStatement>">
+  Parsed SQL statement to prepare.
+</ParamField>
+
+## Pending Query Execution
+
+### PendingQuery
+
+```cpp
+unique_ptr<PendingQueryResult> PendingQuery(
+    const string &query,
+    QueryParameters query_parameters = QueryResultOutputType::FORCE_MATERIALIZED
+)
+```
+
+Issues a query and returns a pending result that can be executed incrementally.
+
+<ParamField path="query" type="const string&">
+  SQL query string to execute.
+</ParamField>
+
+<ParamField path="query_parameters" type="QueryParameters" default="FORCE_MATERIALIZED">
+  Query execution parameters.
+</ParamField>
+
+<ResponseField name="return" type="unique_ptr<PendingQueryResult>">
+  Pending query result that can be executed step-by-step.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto pending = con.PendingQuery("SELECT * FROM large_table");
+
+while (!pending->IsFinished()) {
+    pending->ExecuteTask();
+    // Can check progress, interrupt, etc.
+}
+
+auto result = pending->Execute();
+```
+
+## Transaction Management
+
+### BeginTransaction
+
+```cpp
+void BeginTransaction()
+```
+
+Explicitly begins a new transaction.
+
+### Commit
+
+```cpp
+void Commit()
+```
+
+Commits the current transaction.
+
+### Rollback
+
+```cpp
+void Rollback()
+```
+
+Rolls back the current transaction.
+
+### Transaction Control
+
+```cpp
+void SetAutoCommit(bool auto_commit)
+bool IsAutoCommit()
+bool HasActiveTransaction()
+```
+
+**Example:**
+
+```cpp
+Connection con(db);
+
+con.SetAutoCommit(false);
+con.BeginTransaction();
+
+try {
+    con.Query("INSERT INTO accounts VALUES (1, 100)");
+    con.Query("INSERT INTO accounts VALUES (2, 200)");
+    con.Commit();
+} catch (...) {
+    con.Rollback();
+    throw;
+}
+```
+
+## Relational API
+
+### Table
+
+```cpp
+shared_ptr<Relation> Table(const string &table_name)
+shared_ptr<Relation> Table(const string &schema_name, const string &table_name)
+shared_ptr<Relation> Table(const string &catalog_name, const string &schema_name, const string &table_name)
+```
+
+Returns a relation that produces a table.
+
+<ParamField path="table_name" type="const string&">
+  Name of the table.
+</ParamField>
+
+<ParamField path="schema_name" type="const string&">
+  Schema name (optional).
+</ParamField>
+
+<ParamField path="catalog_name" type="const string&">
+  Catalog name (optional).
+</ParamField>
+
+**Example:**
+
+```cpp
+auto users_table = con.Table("users");
+auto filtered = users_table->Filter("age > 25")->Project("name, age");
+auto result = filtered->Execute();
+```
+
+### ReadCSV
+
+```cpp
+shared_ptr<Relation> ReadCSV(const string &csv_file)
+shared_ptr<Relation> ReadCSV(const string &csv_file, const vector<string> &columns)
+shared_ptr<Relation> ReadCSV(const string &csv_input, named_parameter_map_t &&options)
+```
+
+Reads a CSV file and returns a relation.
+
+**Example:**
+
+```cpp
+auto csv_data = con.ReadCSV("data.csv");
+auto result = csv_data->Limit(10)->Execute();
+```
+
+### ReadParquet
+
+```cpp
+shared_ptr<Relation> ReadParquet(const string &parquet_file, bool binary_as_string)
+```
+
+Reads a Parquet file and returns a relation.
+
+**Example:**
+
+```cpp
+auto parquet_data = con.ReadParquet("data.parquet", true);
+parquet_data->Filter("year = 2024")->Execute()->Print();
+```
+
+### Values
+
+```cpp
+shared_ptr<Relation> Values(const vector<vector<Value>> &values)
+shared_ptr<Relation> Values(const string &values)
+```
+
+Creates a relation from literal values.
+
+**Example:**
+
+```cpp
+vector<vector<Value>> data = {
+    {Value(1), Value("Alice")},
+    {Value(2), Value("Bob")}
+};
+auto relation = con.Values(data);
+```
+
+## Table Information
+
+### TableInfo
+
+```cpp
+unique_ptr<TableDescription> TableInfo(const string &table_name)
+unique_ptr<TableDescription> TableInfo(const string &schema_name, const string &table_name)
+unique_ptr<TableDescription> TableInfo(const string &database_name, const string &schema_name, const string &table_name)
+```
+
+Retrieves table metadata including column names and types.
+
+<ResponseField name="return" type="unique_ptr<TableDescription>">
+  Table description object, or nullptr if table doesn't exist.
+</ResponseField>
+
+**Example:**
+
+```cpp
+auto table_info = con.TableInfo("users");
+if (table_info) {
+    for (auto &col : table_info->columns) {
+        std::cout << col.name << ": " << col.type.ToString() << std::endl;
+    }
+}
+```
+
+## Query Analysis
+
+### ExtractStatements
+
+```cpp
+vector<unique_ptr<SQLStatement>> ExtractStatements(const string &query)
+```
+
+Parses a SQL string and extracts individual statements.
+
+<ParamField path="query" type="const string&">
+  SQL query string potentially containing multiple statements.
+</ParamField>
+
+<ResponseField name="return" type="vector<unique_ptr<SQLStatement>>">
+  Vector of parsed SQL statements.
+</ResponseField>
+
+### ExtractPlan
+
+```cpp
+unique_ptr<LogicalOperator> ExtractPlan(const string &query)
+```
+
+Extracts the logical query plan for a given query.
+
+## Profiling and Debugging
+
+### EnableProfiling / DisableProfiling
+
+```cpp
+void EnableProfiling()
+void DisableProfiling()
+```
+
+Enables or disables query profiling.
+
+### GetProfilingInformation
+
+```cpp
+string GetProfilingInformation(ProfilerPrintFormat format = ProfilerPrintFormat::QUERY_TREE)
+```
+
+Returns profiling information for the last executed query.
+
+**Example:**
+
+```cpp
+con.EnableProfiling();
+con.Query("SELECT * FROM large_table WHERE x > 100");
+std::cout << con.GetProfilingInformation() << std::endl;
+```
+
+### GetProfilingTree
+
+```cpp
+optional_ptr<ProfilingNode> GetProfilingTree()
+```
+
+Returns the root node of the profiling tree for programmatic access.
+
+### Interrupt
+
+```cpp
+void Interrupt()
+```
+
+Interrupts the currently executing query.
+
+### GetQueryProgress
+
+```cpp
+double GetQueryProgress()
+```
+
+Returns the progress of the currently executing query (0.0 to 1.0).
+
+## Usage Examples
+
+### Basic Query Execution
+
+```cpp
+#include "duckdb.hpp"
+
+using namespace duckdb;
+
+int main() {
+    DuckDB db(nullptr);
+    Connection con(db);
+    
+    con.Query("CREATE TABLE integers(i INTEGER)");
+    con.Query("INSERT INTO integers VALUES (3)");
+    auto result = con.Query("SELECT * FROM integers");
+    result->Print();
+}
+```
+
+### Prepared Statements with Parameters
+
+```cpp
+Connection con(db);
+con.Query("CREATE TABLE users(name VARCHAR, age INTEGER)");
+
+auto insert_stmt = con.Prepare("INSERT INTO users VALUES ($1, $2)");
+
+vector<pair<string, int>> users = {
+    {"Alice", 30},
+    {"Bob", 25},
+    {"Charlie", 35}
+};
+
+for (auto &[name, age] : users) {
+    insert_stmt->Execute(name, age);
+}
+
+auto result = con.Query("SELECT * FROM users ORDER BY age");
+result->Print();
+```
+
+### Transaction Management
+
+```cpp
+Connection con(db);
+con.Query("CREATE TABLE accounts(id INTEGER, balance INTEGER)");
+
+con.BeginTransaction();
+
+try {
+    con.Query("INSERT INTO accounts VALUES (1, 1000)");
+    con.Query("UPDATE accounts SET balance = balance - 100 WHERE id = 1");
+    con.Query("INSERT INTO accounts VALUES (2, 100)");
+    
+    con.Commit();
+    std::cout << "Transaction committed" << std::endl;
+} catch (const std::exception &e) {
+    con.Rollback();
+    std::cerr << "Transaction rolled back: " << e.what() << std::endl;
+}
+```
+
+### Reading CSV Files
+
+```cpp
+Connection con(db);
+
+auto csv_relation = con.ReadCSV("data.csv");
+auto filtered = csv_relation->Filter("age > 25");
+auto result = filtered->Execute();
+result->Print();
+```
+
+## See Also
+
+- [Database Class](./database) - Database instance management
+- [Query Results](./query-result) - Working with query results
+- [C++ API Overview](./overview) - General C++ API documentation

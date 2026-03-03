@@ -1,0 +1,513 @@
+---
+title: Query Execution
+description: Understanding DuckDB's vectorized execution engine and parallel processing
+---
+
+DuckDB uses a **vectorized execution model** combined with **push-based pipelining** and **automatic parallelization** to achieve high performance on analytical queries. This execution strategy is fundamentally different from traditional row-at-a-time execution.
+
+## Vectorized Execution
+
+Location: [`src/execution/`](https://github.com/duckdb/duckdb/tree/main/src/execution)
+
+### What is Vectorization?
+
+Instead of processing one row at a time, DuckDB processes data in **vectors** - batches of rows stored in columnar format. This approach provides significant performance benefits.
+
+**Traditional Row-at-a-Time**:
+```cpp
+for each row {
+    value = row.column;
+    result = function(value);
+    output.append(result);
+}
+// Many function calls, poor CPU cache usage
+```
+
+**Vectorized Processing**:
+```cpp
+for each vector {
+    values[] = vector.column;  // Array of 2048 values
+    results[] = function(values[]);  // Process entire array
+    output.append(results[]);
+}
+// Fewer function calls, better CPU cache usage, SIMD-friendly
+```
+
+### Vector Size
+
+From `src/include/duckdb/common/vector_size.hpp:15-21`:
+
+```cpp
+// The default standard vector size
+#define DEFAULT_STANDARD_VECTOR_SIZE 2048U
+
+// The vector size used in the execution engine
+#ifndef STANDARD_VECTOR_SIZE
+#define STANDARD_VECTOR_SIZE DEFAULT_STANDARD_VECTOR_SIZE
+#endif
+```
+
+**Default vector size: 2,048 rows**
+
+This size is chosen to:
+- Fit comfortably in CPU cache (L1/L2)
+- Enable SIMD (Single Instruction Multiple Data) operations
+- Balance between batch size and memory pressure
+- Be a power of 2 for efficient bit operations
+
+### Data Chunks
+
+Location: `src/common/types/data_chunk.cpp`
+
+Vectors are organized into **DataChunks** - the fundamental unit of data flow in DuckDB.
+
+From `src/common/types/data_chunk.cpp:23-35`:
+
+```cpp
+DataChunk::DataChunk() : count(0), capacity(STANDARD_VECTOR_SIZE) {
+}
+
+void DataChunk::InitializeEmpty(const vector<LogicalType> &types) {
+    D_ASSERT(data.empty());
+    capacity = STANDARD_VECTOR_SIZE;
+    for (idx_t i = 0; i < types.size(); i++) {
+        data.emplace_back(types[i], nullptr);
+    }
+}
+```
+
+A `DataChunk` contains:
+- **Multiple column vectors** (one per column)
+- **Count**: Number of valid rows (≤ 2048)
+- **Capacity**: Maximum rows (typically 2048)
+
+```
+DataChunk:
+  Column 0: [val₁, val₂, ..., val₂₀₄₈]  ← Vector of integers
+  Column 1: [str₁, str₂, ..., str₂₀₄₈]  ← Vector of strings  
+  Column 2: [ts₁,  ts₂,  ..., ts₂₀₄₈]   ← Vector of timestamps
+  Count: 2048
+```
+
+## Benefits of Vectorization
+
+<CardGroup cols={2}>
+  <Card title="CPU Cache Efficiency" icon="microchip">
+    Consecutive memory access patterns maximize CPU cache hits
+  </Card>
+  <Card title="SIMD Instructions" icon="bolt">
+    Process multiple values with single CPU instruction (AVX-512, AVX-256)
+  </Card>
+  <Card title="Branch Prediction" icon="code-branch">
+    Reduce branch mispredictions with batch-oriented logic
+  </Card>
+  <Card title="Function Call Overhead" icon="phone">
+    Amortize function call costs across 2048 rows instead of 1
+  </Card>
+</CardGroup>
+
+### SIMD Example
+
+Modern CPUs can process multiple values simultaneously:
+
+```cpp
+// Traditional: 8 additions (8 cycles)
+result[0] = a[0] + b[0];
+result[1] = a[1] + b[1];
+// ... 6 more
+
+// SIMD (AVX-256): 8 additions in parallel (1-2 cycles)
+__m256i va = _mm256_load_si256(a);
+__m256i vb = _mm256_load_si256(b);
+__m256i vr = _mm256_add_epi32(va, vb);
+_mm256_store_si256(result, vr);
+```
+
+DuckDB automatically uses SIMD when available, without manual intervention.
+
+## Physical Operators
+
+Location: `src/execution/physical_operator.cpp`
+
+The execution engine consists of **physical operators** that implement actual query operations.
+
+From `src/execution/physical_operator.cpp:19-27`:
+
+```cpp
+PhysicalOperator::PhysicalOperator(PhysicalPlan &physical_plan, 
+                                   PhysicalOperatorType type, 
+                                   vector<LogicalType> types,
+                                   idx_t estimated_cardinality)
+    : children(physical_plan.ArenaRef()), type(type), 
+      types(std::move(types)),
+      estimated_cardinality(estimated_cardinality) {
+}
+```
+
+### Common Physical Operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| **TableScan** | Read data from storage | `FROM users` |
+| **Filter** | Apply WHERE predicates | `WHERE age > 18` |
+| **Projection** | Select specific columns | `SELECT name, email` |
+| **HashJoin** | Join using hash table | `INNER JOIN orders ON ...` |
+| **HashAggregate** | GROUP BY with aggregates | `GROUP BY country` |
+| **Order** | Sort results | `ORDER BY created_at DESC` |
+| **Limit** | Restrict output rows | `LIMIT 100` |
+| **Window** | Window functions | `ROW_NUMBER() OVER (...)` |
+
+### Operator Interface
+
+From `src/execution/physical_operator.cpp:97-100`:
+
+```cpp
+OperatorResultType PhysicalOperator::Execute(ExecutionContext &context, 
+                                             DataChunk &input, 
+                                             DataChunk &chunk,
+                                             GlobalOperatorState &gstate, 
+                                             OperatorState &state) const {
+    throw InternalException("Calling Execute on a node that is not an operator!");
+}
+```
+
+Each operator:
+1. Takes input `DataChunk` (or pulls from child operators)
+2. Processes the data
+3. Produces output `DataChunk`
+4. Returns status (more data, finished, etc.)
+
+## Push-Based Execution Model
+
+DuckDB uses a **push-based** (also called "data-centric") execution model where data flows from operators to their parents.
+
+### Pull vs Push
+
+**Pull-Based (Volcano/Iterator)**:
+```cpp
+// Parent asks for data
+while (chunk = child.GetNext()) {
+    process(chunk);
+}
+```
+
+**Push-Based (DuckDB)**:
+```cpp
+// Child pushes data to parent
+child.Execute(chunk) {
+    process_data();
+    parent.Execute(output_chunk);  // Push to parent
+}
+```
+
+### Benefits of Push-Based
+
+<AccordionGroup>
+  <Accordion title="Better Pipelining">
+    Data flows through multiple operators without materialization. A chunk can be filtered, projected, and aggregated in a single pass.
+  </Accordion>
+  
+  <Accordion title="Cache Efficiency">
+    Data stays hot in CPU cache as it flows through the pipeline.
+  </Accordion>
+  
+  <Accordion title="Parallelism">
+    Multiple pipelines can run concurrently on different cores.
+  </Accordion>
+  
+  <Accordion title="Morsel-Driven Parallelism">
+    Work is divided into small chunks (morsels) that can be distributed across threads.
+  </Accordion>
+</AccordionGroup>
+
+## Query Optimization
+
+Location: [`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)
+
+Before execution, queries are optimized through multiple passes. See [Architecture](/concepts/architecture#optimizer) for details.
+
+### Key Optimizations for Execution
+
+**1. Predicate Pushdown**
+```sql
+-- Original query
+SELECT name FROM (SELECT * FROM users) WHERE age > 30;
+
+-- Optimized: Filter pushed to table scan
+TableScan(users) WITH FILTER age > 30 → Project(name)
+```
+
+**2. Projection Pushdown**
+```sql
+-- Only read 'name' and 'age' columns, skip others
+SELECT name FROM users WHERE age > 30;
+```
+
+**3. Join Ordering**
+```sql
+-- Small table (countries) as build side, large table (users) as probe side
+SELECT * FROM users 
+JOIN countries ON users.country_id = countries.id;
+```
+
+**4. Filter Ordering**
+```cpp
+// Apply most selective filters first
+WHERE cheap_filter(...) AND expensive_filter(...)  -- cheap first
+```
+
+## Parallel Execution
+
+DuckDB automatically parallelizes query execution across available CPU cores.
+
+### Thread Count
+
+From `src/execution/physical_operator.cpp:56-73`:
+
+```cpp
+idx_t PhysicalOperator::EstimatedThreadCount() const {
+    idx_t result = 0;
+    if (children.empty()) {
+        // Terminal operator (base table scan)
+        // Determines degree of parallelism
+        result = MaxValue<idx_t>(estimated_cardinality / (DEFAULT_ROW_GROUP_SIZE * 2), 1);
+    } else if (type == PhysicalOperatorType::UNION) {
+        // UNION: sum children's thread counts
+        for (auto &child : children) {
+            result += child.get().EstimatedThreadCount();
+        }
+    } else {
+        // Other operators: max of children
+        for (auto &child : children) {
+            result = MaxValue(child.get().EstimatedThreadCount(), result);
+        }
+    }
+    return result;
+}
+```
+
+### Morsel-Driven Parallelism
+
+Work is divided into **morsels** (typically row groups of ~122K rows) that can be processed independently.
+
+```
+Table with 1M rows → 8 row groups
+
+Thread 1: Process row groups 0, 1
+Thread 2: Process row groups 2, 3
+Thread 3: Process row groups 4, 5  
+Thread 4: Process row groups 6, 7
+
+→ All results combined
+```
+
+**Benefits**:
+- **Load balancing**: Fast threads can pick up more morsels
+- **No synchronization overhead** during processing
+- **Cache-friendly**: Each thread works on contiguous data
+
+### Configuring Parallelism
+
+```sql
+-- Set number of threads
+SET threads = 8;
+
+-- Check current setting
+SELECT current_setting('threads');
+
+-- Disable parallelism (for debugging)
+SET threads = 1;
+```
+
+## Pipeline Execution
+
+Operators are organized into **pipelines** - sequences of operators that can run without materializing intermediate results.
+
+### Pipeline Breakers
+
+Some operators require materialization and break the pipeline:
+
+| Operator | Why It Breaks Pipeline |
+|----------|-------------------------|
+| **HashJoin (build side)** | Must build complete hash table before probing |
+| **HashAggregate** | Must see all rows before finalizing groups |
+| **Order** | Must collect all rows before sorting |
+| **Window (some)** | Depends on window frame specification |
+
+### Example Query Execution
+
+```sql
+SELECT country, COUNT(*) as user_count
+FROM users
+WHERE age > 18
+GROUP BY country
+ORDER BY user_count DESC
+LIMIT 10;
+```
+
+**Execution plan**:
+```
+1. TableScan(users) 
+   ↓ [Pipeline 1]
+2. Filter(age > 18)
+   ↓
+3. HashAggregate(GROUP BY country)  ← Pipeline breaker
+   ↓ [Pipeline 2]
+4. Order(user_count DESC)            ← Pipeline breaker
+   ↓ [Pipeline 3]
+5. Limit(10)
+```
+
+**Pipeline 1**: Scan → Filter → Aggregate (streaming)
+- Each vector flows from scan through filter to aggregator
+- No intermediate materialization
+- Parallel: Multiple threads scan different row groups
+
+**Pipeline 2**: Aggregate → Order
+- Wait for all aggregation to complete
+- Stream results to sort
+
+**Pipeline 3**: Order → Limit
+- Sort completes, stream sorted results
+- Stop after 10 rows (early termination)
+
+## Adaptive Execution
+
+Location: `src/execution/adaptive_filter.cpp`
+
+DuckDB adapts execution strategies based on runtime statistics:
+
+### Adaptive Filtering
+
+```sql
+WHERE expensive_function(x) > 10 AND cheap_column = 'value'
+```
+
+The executor tracks filter selectivity and may reorder predicates dynamically:
+- If `cheap_column = 'value'` eliminates 99% of rows → evaluate it first
+- If both are selective → use cost-based ordering
+
+### Adaptive Hash Joins
+
+Hash joins adapt based on data size:
+- **Small data**: In-memory hash table
+- **Medium data**: Partitioned hash table
+- **Large data**: Disk-based partitioning with spillage
+
+## Performance Monitoring
+
+### EXPLAIN ANALYZE
+
+See actual execution statistics:
+
+```sql
+EXPLAIN ANALYZE
+SELECT country, COUNT(*) 
+FROM users 
+WHERE age > 18 
+GROUP BY country;
+```
+
+Output includes:
+- Actual row counts vs estimates
+- Execution time per operator
+- Memory usage
+- Parallelism degree
+
+### Profiling
+
+```sql
+-- Enable profiling
+PRAGMA enable_profiling;
+PRAGMA profiling_output = 'query_profile.json';
+
+-- Run query
+SELECT ...;
+
+-- Profiling data written to file
+```
+
+## Execution Best Practices
+
+<Steps>
+  <Step title="Filter Early">
+    Apply WHERE clauses to reduce data volume as early as possible.
+    
+    ```sql
+    -- Good: Filter before join
+    SELECT * FROM large_table 
+    WHERE date > '2026-01-01'
+    JOIN small_table ON ...;
+    ```
+  </Step>
+  
+  <Step title="Project Only Needed Columns">
+    Avoid `SELECT *` - specify only required columns.
+    
+    ```sql
+    -- Bad: Reads all 50 columns
+    SELECT * FROM wide_table WHERE id = 1;
+    
+    -- Good: Reads only 2 columns
+    SELECT name, email FROM wide_table WHERE id = 1;
+    ```
+  </Step>
+  
+  <Step title="Use Appropriate Joins">
+    Consider join order and types based on table sizes.
+    
+    ```sql
+    -- Small table (build side) first in hash join
+    SELECT * FROM small_table 
+    JOIN large_table ON ...;
+    ```
+  </Step>
+  
+  <Step title="Leverage Statistics">
+    DuckDB uses statistics for row group pruning - ensure data is somewhat ordered.
+  </Step>
+  
+  <Step title="Tune Thread Count">
+    More threads ≠ faster. Optimal thread count depends on data size and query.
+    
+    ```sql
+    SET threads = 4;  -- For typical analytical queries
+    ```
+  </Step>
+</Steps>
+
+## Execution Summary
+
+<CardGroup cols={2}>
+  <Card title="Vectorized" icon="layer-group">
+    Process 2,048 rows at a time for CPU efficiency
+  </Card>
+  <Card title="Push-Based" icon="arrow-up">
+    Data flows through pipelines without materialization
+  </Card>
+  <Card title="Parallel" icon="gears">
+    Automatic parallelization across CPU cores
+  </Card>
+  <Card title="Adaptive" icon="chart-line">
+    Runtime adaptation based on actual data characteristics
+  </Card>
+</CardGroup>
+
+```mermaid
+graph LR
+    A[SQL Query] --> B[Parse]
+    B --> C[Plan]
+    C --> D[Optimize]
+    D --> E[Physical Plan]
+    E --> F[Parallel Pipelines]
+    F --> G[Vectorized Execution]
+    G --> H[Results]
+    
+    style G fill:#90EE90
+```
+
+<Card title="Next Steps" icon="arrow-right">
+  - Understand the [Storage System](/concepts/storage) that feeds execution
+  - Learn about [Data Types](/concepts/data-types) and their processing
+  - Review the complete [Architecture](/concepts/architecture)
+</Card>

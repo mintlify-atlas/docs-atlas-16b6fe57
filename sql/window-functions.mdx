@@ -1,0 +1,455 @@
+---
+title: Window Functions
+description: Master window functions in DuckDB including ROW_NUMBER, RANK, LEAD, LAG, and analytical operations
+---
+
+Window functions perform calculations across a set of rows that are related to the current row. Unlike aggregate functions that collapse rows, window functions retain all rows while adding computed values.
+
+## Window Function Syntax
+
+The basic syntax for window functions uses the OVER clause:
+
+```sql
+function_name([arguments]) OVER (
+  [PARTITION BY partition_expression]
+  [ORDER BY sort_expression]
+  [frame_specification]
+)
+```
+
+### Components
+
+- **PARTITION BY**: Divides rows into partitions (groups)
+- **ORDER BY**: Defines the order within each partition
+- **Frame Specification**: Defines the window frame (ROWS or RANGE)
+
+## Basic Window Function Example
+
+From the DuckDB test suite:
+
+```sql
+CREATE TABLE empsalary (
+  depname VARCHAR, 
+  empno BIGINT, 
+  salary INTEGER, 
+  enroll_date DATE
+);
+
+INSERT INTO empsalary VALUES 
+  ('develop', 10, 5200, '2007-08-01'),
+  ('sales', 1, 5000, '2006-10-01'),
+  ('personnel', 5, 3500, '2007-12-10'),
+  ('sales', 4, 4800, '2007-08-08'),
+  ('develop', 8, 6000, '2006-10-01');
+
+-- Running sum by department
+SELECT 
+  depname, 
+  empno, 
+  salary, 
+  SUM(salary) OVER (PARTITION BY depname ORDER BY empno) AS running_sum
+FROM empsalary 
+ORDER BY depname, empno;
+```
+
+## Ranking Functions
+
+Ranking functions assign ranks to rows within partitions.
+
+### ROW_NUMBER
+
+Assigns a unique sequential number to each row:
+
+<CodeGroup>
+```sql Basic ROW_NUMBER
+SELECT 
+  depname,
+  empno,
+  salary,
+  ROW_NUMBER() OVER (PARTITION BY depname ORDER BY salary) AS row_num
+FROM empsalary
+ORDER BY depname, row_num;
+```
+
+```sql Global Row Number
+SELECT 
+  empno,
+  ROW_NUMBER() OVER (ORDER BY salary DESC) AS salary_rank
+FROM empsalary;
+```
+</CodeGroup>
+
+### RANK and DENSE_RANK
+
+<CodeGroup>
+```sql RANK
+-- Leaves gaps after ties
+SELECT 
+  salary,
+  RANK() OVER (ORDER BY salary DESC) AS rank
+FROM empsalary;
+-- Same salary gets same rank, next rank skips
+```
+
+```sql DENSE_RANK
+-- No gaps in ranking
+SELECT 
+  depname,
+  salary,
+  DENSE_RANK() OVER (PARTITION BY depname ORDER BY salary DESC) AS dense_rank
+FROM empsalary;
+```
+</CodeGroup>
+
+Example from DuckDB tests showing DENSE_RANK:
+
+```sql
+WITH t AS (
+  SELECT 
+    i, 
+    DENSE_RANK() OVER (ORDER BY i % 50) AS d
+  FROM range(3000) tbl(i)
+)
+SELECT 
+  COUNT(*) AS num_ranks,
+  MIN(d) AS min_rank,
+  MAX(d) AS max_rank
+FROM (
+  SELECT d, COUNT(*) AS c
+  FROM t
+  GROUP BY d
+) w;
+```
+
+### Complex DENSE_RANK Example
+
+From DuckDB's test suite - counting distinct values:
+
+```sql
+WITH dups AS (
+  SELECT 
+    ROW_NUMBER() OVER same_idx AS dup,
+    COUNT(*) OVER same_idx AS n_dup,
+    (DENSE_RANK() OVER asc_spcmn) + 
+    (DENSE_RANK() OVER desc_spcmn) - 1 AS n_spcmn,
+    *
+  FROM issue9416
+  WINDOW 
+    same_idx AS (
+      PARTITION BY idx
+      ORDER BY source, project, specimen
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ),
+    asc_spcmn AS (
+      PARTITION BY idx
+      ORDER BY specimen ASC NULLS FIRST
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ),
+    desc_spcmn AS (
+      PARTITION BY idx
+      ORDER BY specimen DESC NULLS LAST
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    )
+)
+SELECT *
+FROM dups
+WHERE n_spcmn > 1
+ORDER BY idx, dup;
+```
+
+## Value Functions
+
+Value functions access data from other rows relative to the current row.
+
+### LEAD and LAG
+
+<CodeGroup>
+```sql LEAD
+-- Access next row's value
+SELECT 
+  date,
+  amount,
+  LEAD(amount) OVER (ORDER BY date) AS next_amount,
+  LEAD(amount, 2) OVER (ORDER BY date) AS amount_two_ahead
+FROM sales;
+```
+
+```sql LAG
+-- Access previous row's value
+SELECT 
+  date,
+  amount,
+  LAG(amount) OVER (ORDER BY date) AS prev_amount,
+  amount - LAG(amount) OVER (ORDER BY date) AS change
+FROM sales;
+```
+</CodeGroup>
+
+Real example from DuckDB tests:
+
+```sql
+CREATE TABLE win(
+  id INT, 
+  v INT, 
+  t INT, 
+  f FLOAT, 
+  s VARCHAR
+);
+
+INSERT INTO win VALUES
+  (1, 1, 2, 0.54, 'h'),
+  (1, 1, 1, 0.21, 'e'),
+  (1, 2, 3, 0.001, 'l'),
+  (2, 10, 4, 0.04, 'l'),
+  (2, 11, -1, 10.45, 'o');
+
+SELECT 
+  id, 
+  v, 
+  t, 
+  LAG(v, 2, NULL) OVER (PARTITION BY id ORDER BY t ASC) AS lagged
+FROM win
+ORDER BY id, t;
+```
+
+### LEAD with Default Values
+
+```sql
+SELECT
+  date,
+  "group",
+  count,
+  status,
+  LEAD(date, 2) OVER (
+    PARTITION BY "group" 
+    ORDER BY date ASC 
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+  ) AS end_date,
+  LEAD(status, 2) OVER (
+    PARTITION BY "group" 
+    ORDER BY date ASC 
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+  ) AS end_status
+FROM issue14398
+ORDER BY "group", date;
+```
+
+### FIRST_VALUE and LAST_VALUE
+
+<CodeGroup>
+```sql FIRST_VALUE
+SELECT 
+  depname,
+  empno,
+  salary,
+  FIRST_VALUE(empno) OVER (
+    PARTITION BY depname 
+    ORDER BY empno
+  ) AS first_empno
+FROM empsalary;
+```
+
+```sql LAST_VALUE
+SELECT 
+  depname, 
+  empno,
+  LAST_VALUE(empno) OVER (
+    PARTITION BY depname 
+    ORDER BY empno ASC
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  ) AS last_empno
+FROM empsalary;
+```
+</CodeGroup>
+
+<Note>
+LAST_VALUE requires careful frame specification. By default, frames end at the current row, so you typically need `ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING`.
+</Note>
+
+## Aggregate Functions as Window Functions
+
+Any aggregate function can be used as a window function:
+
+<CodeGroup>
+```sql Running Aggregates
+SELECT 
+  depname,
+  salary,
+  SUM(salary) OVER (PARTITION BY depname ORDER BY salary) AS running_sum,
+  AVG(salary) OVER (PARTITION BY depname ORDER BY salary) AS running_avg,
+  COUNT(*) OVER (PARTITION BY depname ORDER BY salary) AS running_count
+FROM empsalary
+ORDER BY depname, salary;
+```
+
+```sql Department Statistics
+SELECT 
+  depname,
+  empno,
+  salary,
+  AVG(salary) OVER (PARTITION BY depname) AS dept_avg,
+  salary - AVG(salary) OVER (PARTITION BY depname) AS diff_from_avg
+FROM empsalary;
+```
+</CodeGroup>
+
+## Window Frames
+
+Window frames define which rows are included in the window function calculation.
+
+### Frame Types
+
+<CodeGroup>
+```sql ROWS Frame
+-- Physical offset in rows
+SELECT 
+  date,
+  amount,
+  AVG(amount) OVER (
+    ORDER BY date
+    ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING
+  ) AS moving_avg_5day
+FROM sales;
+```
+
+```sql RANGE Frame
+-- Logical range based on values
+SELECT 
+  date,
+  amount,
+  SUM(amount) OVER (
+    ORDER BY date
+    RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW
+  ) AS trailing_7day_sum
+FROM sales;
+```
+</CodeGroup>
+
+### Frame Boundaries
+
+```sql
+-- Default: RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+SELECT SUM(salary) OVER (ORDER BY empno);
+
+-- Explicit boundaries
+SELECT 
+  salary,
+  SUM(salary) OVER (
+    ORDER BY empno
+    ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+  ) AS three_row_sum,
+  SUM(salary) OVER (
+    ORDER BY empno
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+  ) AS total_sum,
+  SUM(salary) OVER (
+    ORDER BY empno
+    ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+  ) AS remaining_sum
+FROM empsalary;
+```
+
+## Named Windows
+
+Define windows once and reuse them:
+
+```sql
+SELECT 
+  depname,
+  empno,
+  salary,
+  ROW_NUMBER() OVER w AS row_num,
+  AVG(salary) OVER w AS dept_avg,
+  salary - AVG(salary) OVER w AS diff
+FROM empsalary
+WINDOW w AS (PARTITION BY depname ORDER BY salary)
+ORDER BY depname, salary;
+```
+
+## Practical Examples
+
+### Running Totals
+
+```sql
+SELECT 
+  date,
+  amount,
+  SUM(amount) OVER (ORDER BY date) AS running_total
+FROM transactions
+ORDER BY date;
+```
+
+### Top N per Group
+
+```sql
+WITH ranked AS (
+  SELECT 
+    depname,
+    empno,
+    salary,
+    ROW_NUMBER() OVER (PARTITION BY depname ORDER BY salary DESC) AS rank
+  FROM empsalary
+)
+SELECT depname, empno, salary
+FROM ranked
+WHERE rank <= 3
+ORDER BY depname, rank;
+```
+
+### Moving Averages
+
+```sql
+SELECT 
+  date,
+  price,
+  AVG(price) OVER (
+    ORDER BY date
+    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+  ) AS moving_avg_7day,
+  AVG(price) OVER (
+    ORDER BY date
+    ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+  ) AS moving_avg_30day
+FROM stock_prices
+ORDER BY date;
+```
+
+### Year-over-Year Comparison
+
+```sql
+SELECT 
+  DATE_TRUNC('month', date) AS month,
+  SUM(amount) AS monthly_total,
+  LAG(SUM(amount), 12) OVER (ORDER BY DATE_TRUNC('month', date)) AS last_year,
+  SUM(amount) - LAG(SUM(amount), 12) OVER (ORDER BY DATE_TRUNC('month', date)) AS yoy_change
+FROM sales
+GROUP BY month
+ORDER BY month;
+```
+
+### Percentile Rankings
+
+```sql
+SELECT 
+  empno,
+  salary,
+  PERCENT_RANK() OVER (ORDER BY salary) AS percentile,
+  CUME_DIST() OVER (ORDER BY salary) AS cumulative_dist,
+  NTILE(4) OVER (ORDER BY salary) AS quartile
+FROM empsalary;
+```
+
+<Tip>
+Window functions are evaluated after WHERE, GROUP BY, and HAVING but before ORDER BY and LIMIT.
+</Tip>
+
+## Performance Considerations
+
+- Window functions can be computationally expensive on large datasets
+- Partitioning reduces the working set for each window
+- Named windows improve readability and can help the optimizer
+- DuckDB parallelizes window function execution when possible
+
+<Note>
+Use `EXPLAIN` to understand how DuckDB will execute your window functions and identify optimization opportunities.
+</Note>

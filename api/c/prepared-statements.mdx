@@ -1,0 +1,311 @@
+---
+title: Prepared statements
+description: Use parameterized queries with the DuckDB C API
+---
+
+Prepared statements allow you to execute parameterized SQL queries efficiently and safely. They prevent SQL injection and improve performance when executing the same query multiple times with different parameters.
+
+## Creating Prepared Statements
+
+Prepare a SQL statement with parameter placeholders:
+
+```c
+duckdb_state duckdb_prepare(
+    duckdb_connection connection,
+    const char *query,
+    duckdb_prepared_statement *out_prepared_statement
+);
+```
+
+<ParamField path="connection" type="duckdb_connection" required>
+  Active database connection.
+</ParamField>
+
+<ParamField path="query" type="const char*" required>
+  SQL query with `$1`, `$2`, ... as parameter placeholders.
+</ParamField>
+
+<ParamField path="out_prepared_statement" type="duckdb_prepared_statement*" required>
+  Output parameter for the prepared statement handle.
+</ParamField>
+
+**Example**:
+
+```c
+duckdb_prepared_statement stmt;
+if (duckdb_prepare(con, "SELECT * FROM users WHERE age > $1 AND city = $2", &stmt) == DuckDBError) {
+    fprintf(stderr, "Failed to prepare statement\n");
+    return 1;
+}
+```
+
+## Binding Parameters
+
+Bind values to parameter placeholders before execution:
+
+### Binding Functions
+
+```c
+// Bind boolean
+duckdb_state duckdb_bind_boolean(duckdb_prepared_statement prepared_statement, idx_t param_idx, bool val);
+
+// Bind integers
+duckdb_state duckdb_bind_int8(duckdb_prepared_statement prepared_statement, idx_t param_idx, int8_t val);
+duckdb_state duckdb_bind_int16(duckdb_prepared_statement prepared_statement, idx_t param_idx, int16_t val);
+duckdb_state duckdb_bind_int32(duckdb_prepared_statement prepared_statement, idx_t param_idx, int32_t val);
+duckdb_state duckdb_bind_int64(duckdb_prepared_statement prepared_statement, idx_t param_idx, int64_t val);
+
+// Bind floating point
+duckdb_state duckdb_bind_float(duckdb_prepared_statement prepared_statement, idx_t param_idx, float val);
+duckdb_state duckdb_bind_double(duckdb_prepared_statement prepared_statement, idx_t param_idx, double val);
+
+// Bind strings
+duckdb_state duckdb_bind_varchar(duckdb_prepared_statement prepared_statement, idx_t param_idx, const char *val);
+duckdb_state duckdb_bind_varchar_length(duckdb_prepared_statement prepared_statement, idx_t param_idx, const char *val, idx_t length);
+
+// Bind NULL
+duckdb_state duckdb_bind_null(duckdb_prepared_statement prepared_statement, idx_t param_idx);
+
+// Bind date/time types
+duckdb_state duckdb_bind_date(duckdb_prepared_statement prepared_statement, idx_t param_idx, duckdb_date val);
+duckdb_state duckdb_bind_time(duckdb_prepared_statement prepared_statement, idx_t param_idx, duckdb_time val);
+duckdb_state duckdb_bind_timestamp(duckdb_prepared_statement prepared_statement, idx_t param_idx, duckdb_timestamp val);
+```
+
+<Note>
+Parameter indices are 1-based (first parameter is `$1`, which has index 1).
+</Note>
+
+### Binding Example
+
+```c
+duckdb_prepared_statement stmt;
+duckdb_prepare(con, "INSERT INTO users(name, age, salary) VALUES ($1, $2, $3)", &stmt);
+
+// Bind parameters
+duckdb_bind_varchar(stmt, 1, "Alice");
+duckdb_bind_int32(stmt, 2, 30);
+duckdb_bind_double(stmt, 3, 75000.50);
+```
+
+## Executing Prepared Statements
+
+Execute a prepared statement after binding parameters:
+
+```c
+duckdb_state duckdb_execute_prepared(
+    duckdb_prepared_statement prepared_statement,
+    duckdb_result *out_result
+);
+```
+
+<ParamField path="prepared_statement" type="duckdb_prepared_statement" required>
+  The prepared statement to execute.
+</ParamField>
+
+<ParamField path="out_result" type="duckdb_result*">
+  Output parameter for results. Pass NULL if no results are needed.
+</ParamField>
+
+**Example**:
+
+```c
+duckdb_result result;
+if (duckdb_execute_prepared(stmt, &result) == DuckDBSuccess) {
+    // Process result...
+    duckdb_destroy_result(&result);
+}
+```
+
+## Complete Example
+
+Insert multiple rows using a prepared statement:
+
+```c
+#include "duckdb.h"
+#include <stdio.h>
+
+int main() {
+    duckdb_database db;
+    duckdb_connection con;
+    duckdb_prepared_statement stmt;
+
+    // Setup
+    duckdb_open(NULL, &db);
+    duckdb_connect(db, &con);
+
+    // Create table
+    duckdb_query(con, "CREATE TABLE products(id INTEGER, name VARCHAR, price DOUBLE)", NULL);
+
+    // Prepare INSERT statement
+    if (duckdb_prepare(con, "INSERT INTO products VALUES ($1, $2, $3)", &stmt) == DuckDBError) {
+        fprintf(stderr, "Failed to prepare statement\n");
+        goto cleanup;
+    }
+
+    // Insert multiple rows
+    struct {
+        int id;
+        const char *name;
+        double price;
+    } products[] = {
+        {1, "Laptop", 999.99},
+        {2, "Mouse", 29.99},
+        {3, "Keyboard", 79.99}
+    };
+
+    for (int i = 0; i < 3; i++) {
+        // Bind parameters
+        duckdb_bind_int32(stmt, 1, products[i].id);
+        duckdb_bind_varchar(stmt, 2, products[i].name);
+        duckdb_bind_double(stmt, 3, products[i].price);
+
+        // Execute
+        if (duckdb_execute_prepared(stmt, NULL) == DuckDBError) {
+            fprintf(stderr, "Failed to insert row %d\n", i);
+        }
+
+        // Clear bindings for next iteration
+        duckdb_clear_bindings(stmt);
+    }
+
+    // Query results
+    duckdb_result result;
+    if (duckdb_query(con, "SELECT * FROM products", &result) == DuckDBSuccess) {
+        idx_t row_count = duckdb_row_count(&result);
+        printf("Inserted %llu rows\n", row_count);
+        duckdb_destroy_result(&result);
+    }
+
+    duckdb_destroy_prepare(&stmt);
+
+cleanup:
+    duckdb_disconnect(&con);
+    duckdb_close(&db);
+    return 0;
+}
+```
+
+## Query with Parameters
+
+Select data using prepared statements:
+
+```c
+duckdb_prepared_statement stmt;
+duckdb_result result;
+
+// Prepare SELECT with parameters
+if (duckdb_prepare(con, "SELECT name, price FROM products WHERE price > $1 AND name LIKE $2", &stmt) == DuckDBSuccess) {
+    // Bind parameters
+    duckdb_bind_double(stmt, 1, 50.0);
+    duckdb_bind_varchar(stmt, 2, "%top%");
+
+    // Execute
+    if (duckdb_execute_prepared(stmt, &result) == DuckDBSuccess) {
+        idx_t row_count = duckdb_row_count(&result);
+        for (idx_t i = 0; i < row_count; i++) {
+            char *name = duckdb_value_varchar(&result, 0, i);
+            double price = duckdb_value_double(&result, 1, i);
+            printf("%s: $%.2f\n", name, price);
+            duckdb_free(name);
+        }
+        duckdb_destroy_result(&result);
+    }
+
+    duckdb_destroy_prepare(&stmt);
+}
+```
+
+## Prepared Statement Management
+
+### Get Parameter Count
+
+```c
+idx_t duckdb_nparams(duckdb_prepared_statement prepared_statement);
+```
+
+Returns the number of parameters in the prepared statement.
+
+### Get Parameter Type
+
+```c
+duckdb_type duckdb_param_type(duckdb_prepared_statement prepared_statement, idx_t param_idx);
+```
+
+Returns the expected type for a parameter.
+
+### Clear Bindings
+
+```c
+duckdb_state duckdb_clear_bindings(duckdb_prepared_statement prepared_statement);
+```
+
+Reset all bound parameters. Useful when re-executing with different values.
+
+### Get Error Message
+
+```c
+const char *duckdb_prepare_error(duckdb_prepared_statement prepared_statement);
+```
+
+Returns error message if preparation failed.
+
+### Destroy Prepared Statement
+
+```c
+void duckdb_destroy_prepare(duckdb_prepared_statement *prepared_statement);
+```
+
+<Warning>
+Always call `duckdb_destroy_prepare()` to free resources when done with a prepared statement.
+</Warning>
+
+## Benefits of Prepared Statements
+
+<CardGroup cols={2}>
+  <Card title="SQL Injection Prevention" icon="shield">
+    Parameters are properly escaped, preventing SQL injection attacks.
+  </Card>
+  <Card title="Performance" icon="gauge">
+    Query is parsed and optimized once, then executed multiple times.
+  </Card>
+  <Card title="Type Safety" icon="check">
+    Parameter types are validated at bind time.
+  </Card>
+  <Card title="Cleaner Code" icon="code">
+    No need for manual string concatenation or escaping.
+  </Card>
+</CardGroup>
+
+## Comparison: Direct Query vs Prepared
+
+<CodeGroup>
+
+```c Direct Query (Don't do this!)
+// Unsafe: vulnerable to SQL injection
+char query[256];
+sprintf(query, "SELECT * FROM users WHERE name = '%s'", user_input);
+duckdb_query(con, query, &result);
+```
+
+```c Prepared Statement (Safe)
+// Safe: parameters are properly escaped
+duckdb_prepared_statement stmt;
+duckdb_prepare(con, "SELECT * FROM users WHERE name = $1", &stmt);
+duckdb_bind_varchar(stmt, 1, user_input);
+duckdb_execute_prepared(stmt, &result);
+duckdb_destroy_prepare(&stmt);
+```
+
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Appender" icon="database" href="/api/c/appender">
+    Bulk load data even faster
+  </Card>
+  <Card title="Data Types" icon="table" href="/api/c/data-types">
+    Learn about all supported data types
+  </Card>
+</CardGroup>

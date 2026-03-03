@@ -1,0 +1,147 @@
+---
+title: CLI Overview
+description: Overview of the DuckDB command-line interface (CLI)
+---
+
+The DuckDB CLI is a command-line tool for interacting with DuckDB databases. It provides an interactive shell for executing SQL queries and managing databases.
+
+## Starting the CLI
+
+### Basic Usage
+
+Start the CLI with an in-memory database:
+
+```bash
+duckdb
+```
+
+Open or create a database file:
+
+```bash
+duckdb mydata.db
+```
+
+Execute a query and exit:
+
+```bash
+duckdb mydata.db -c "SELECT * FROM my_table"
+```
+
+### Command-Line Options
+
+The CLI supports various options to control its behavior:
+
+```bash
+duckdb [OPTIONS] FILENAME [SQL]
+```
+
+Common options:
+- `-c COMMAND` - Run command and exit
+- `-cmd COMMAND` - Run command before reading stdin
+- `-f FILENAME` - Read and execute SQL from file
+- `-init FILENAME` - Read initialization commands from file
+- `-readonly` - Open database in read-only mode
+- `-version` - Show DuckDB version
+
+## Interactive Mode
+
+When started without the `-c` flag, DuckDB enters interactive mode:
+
+```bash
+$ duckdb
+v1.2.0 (dev)
+Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+D 
+```
+
+### Basic Query Examples
+
+Create a table:
+
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR,
+    age INTEGER
+);
+```
+
+Insert data:
+
+```sql
+INSERT INTO users VALUES (1, 'Alice', 30);
+INSERT INTO users VALUES (2, 'Bob', 25);
+```
+
+Query data:
+
+```sql
+SELECT * FROM users WHERE age > 25;
+```
+
+Output:
+```
+┌───────┬─────────┬───────┐
+│  id   │  name   │  age  │
+│ int32 │ varchar │ int32 │
+├───────┼─────────┼───────┤
+│     1 │ Alice   │    30 │
+└───────┴─────────┴───────┘
+```
+
+## Reading from Files
+
+Execute SQL from a file:
+
+```bash
+duckdb mydata.db < script.sql
+```
+
+Or use the `.read` command in interactive mode:
+
+```sql
+.read script.sql
+```
+
+## Output Modes
+
+The CLI supports multiple output formats. Change the output mode using the `.mode` command:
+
+```sql
+.mode csv
+SELECT * FROM users;
+```
+
+Available modes:
+- `duckbox` - Unicode box drawing (default)
+- `csv` - Comma-separated values
+- `json` - JSON array
+- `markdown` - Markdown table
+- `table` - ASCII table
+- `line` - One value per line
+- `list` - Values delimited by `|`
+
+## Exiting the CLI
+
+Exit the CLI using:
+
+```sql
+.quit
+```
+
+Or press `Ctrl+D` (Unix/Linux/macOS) or `Ctrl+Z` then Enter (Windows).
+
+## Getting Help
+
+Display help information:
+
+```sql
+.help
+```
+
+Get help for a specific command:
+
+```sql
+.help import
+```

@@ -1,0 +1,272 @@
+---
+title: Configuration Options
+description: Command-line options and configuration settings for the DuckDB CLI
+---
+
+The DuckDB CLI can be configured using command-line options when starting the CLI, or by using dot commands within an interactive session.
+
+## Command-Line Options
+
+Options can be specified when starting the DuckDB CLI:
+
+```bash
+duckdb [OPTIONS] FILENAME [SQL]
+```
+
+### Output Mode Options
+
+Set the output format for query results:
+
+- `-ascii` - Set output mode to 'ascii' (uses ASCII unit and record separators)
+- `-box` - Set output mode to 'box' (Unicode box-drawing characters)
+- `-column` - Set output mode to 'column' (columnar output)
+- `-csv` - Set output mode to 'csv' (comma-separated values)
+- `-html` - Set output mode to 'html' (HTML table format)
+- `-json` - Set output mode to 'json' (JSON array)
+- `-jsonlines` - Set output mode to 'jsonlines' (newline-delimited JSON)
+- `-line` - Set output mode to 'line' (one column per line)
+- `-list` - Set output mode to 'list' (values delimited by `|`)
+- `-markdown` - Set output mode to 'markdown' (Markdown table format)
+- `-quote` - Set output mode to 'quote' (SQL-style quoting)
+- `-table` - Set output mode to 'table' (ASCII table)
+
+Example:
+
+```bash
+duckdb mydata.db -csv -c "SELECT * FROM users"
+```
+
+### Execution Options
+
+- `-c COMMAND` - Run the SQL command and exit
+- `-cmd COMMAND` - Run the SQL command before reading stdin  
+- `-s COMMAND` - Run the SQL command and exit (same as `-c`)
+- `-f FILENAME` - Read and process SQL commands from file and exit
+
+Example:
+
+```bash
+# Execute a command and exit
+duckdb mydata.db -c "SELECT COUNT(*) FROM users"
+
+# Execute a script file
+duckdb mydata.db -f setup.sql
+```
+
+### Input/Output Options
+
+- `-echo` - Print commands before execution
+- `-header` - Turn headers on
+- `-noheader` - Turn headers off
+- `-interactive` - Force interactive I/O
+- `-batch` - Force batch I/O (non-interactive mode)
+- `-no-stdin` - Exit after processing options instead of reading stdin
+
+Example:
+
+```bash
+# Show commands as they execute
+duckdb mydata.db -echo -c "SELECT * FROM users"
+
+# Batch mode with headers off
+duckdb mydata.db -batch -noheader -c "SELECT * FROM users"
+```
+
+### Initialization Options
+
+- `-init FILENAME` - Read initialization commands from the specified file
+
+By default, DuckDB reads `~/.duckdbrc` on startup. Use `-init` to specify a different file:
+
+```bash
+duckdb mydata.db -init custom_init.sql
+```
+
+### Database Options
+
+- `-readonly` - Open the database in read-only mode
+- `-safe` - Enable safe mode (disables external access)
+- `-unsigned` - Allow loading of unsigned extensions
+- `-unredacted` - Allow printing of unredacted secrets
+
+Example:
+
+```bash
+# Open in read-only mode
+duckdb mydata.db -readonly
+
+# Enable safe mode
+duckdb mydata.db -safe
+```
+
+### Separator Options
+
+- `-separator SEP` - Set output column separator (default: `|`)
+- `-newline SEP` - Set output row separator (default: `\n`)
+- `-nullvalue TEXT` - Set text string for NULL values (default: `NULL`)
+
+Example:
+
+```bash
+# Use comma as separator
+duckdb -list -separator "," -c "SELECT * FROM users"
+
+# Custom NULL representation
+duckdb -nullvalue "N/A" -c "SELECT * FROM users"
+```
+
+### Other Options
+
+- `-bail` - Stop after hitting an error
+- `-version` - Show DuckDB version and exit
+- `-h` or `-help` - Show help message and exit
+- `-ui` - Launch web interface using the UI extension
+
+Example:
+
+```bash
+# Show version
+duckdb -version
+
+# Exit on first error
+duckdb mydata.db -bail -f script.sql
+```
+
+## Output Formats
+
+The CLI supports multiple output formats, configurable with the `-mode` option or `.mode` command.
+
+### Default (duckbox)
+
+Unicode box-drawing with extensive formatting features:
+
+```
+┌───────┬─────────┬───────┐
+│  id   │  name   │  age  │
+│ int32 │ varchar │ int32 │
+├───────┼─────────┼───────┤
+│     1 │ Alice   │    30 │
+│     2 │ Bob     │    25 │
+└───────┴─────────┴───────┘
+```
+
+### CSV
+
+Comma-separated values:
+
+```csv
+id,name,age
+1,Alice,30
+2,Bob,25
+```
+
+### JSON
+
+JSON array format:
+
+```json
+[
+  {"id":1,"name":"Alice","age":30},
+  {"id":2,"name":"Bob","age":25}
+]
+```
+
+### JSON Lines
+
+Newline-delimited JSON:
+
+```json
+{"id":1,"name":"Alice","age":30}
+{"id":2,"name":"Bob","age":25}
+```
+
+### Markdown
+
+Markdown table format:
+
+```markdown
+| id | name  | age |
+|----|-------|-----|
+| 1  | Alice | 30  |
+| 2  | Bob   | 25  |
+```
+
+### List
+
+Pipe-delimited values:
+
+```
+id|name|age
+1|Alice|30
+2|Bob|25
+```
+
+### Line
+
+One value per line:
+
+```
+     id = 1
+   name = Alice
+    age = 30
+
+     id = 2
+   name = Bob
+    age = 25
+```
+
+## Storage Version
+
+Set the database storage compatibility version:
+
+```bash
+duckdb -storage-version v0.10.0 mydata.db
+```
+
+This is useful for maintaining compatibility with older DuckDB versions.
+
+## Configuration File
+
+DuckDB automatically reads `~/.duckdbrc` on startup. This file can contain:
+
+- Dot commands (e.g., `.mode`, `.headers`)
+- SQL statements
+- Configuration settings
+
+Example `~/.duckdbrc`:
+
+```sql
+-- Set default output mode
+.mode duckbox
+
+-- Enable headers
+.headers on
+
+-- Set null value display
+.nullvalue NULL
+
+-- Load common extensions
+LOAD httpfs;
+LOAD parquet;
+
+-- Set up commonly used settings
+SET threads TO 4;
+SET memory_limit = '4GB';
+```
+
+## Environment Variables
+
+The CLI respects these environment variables:
+
+- `DUCKDB_PAGER` - Pager command to use (overrides `PAGER`)
+- `PAGER` - Default pager command (e.g., `less`, `more`)
+- `EDITOR` or `VISUAL` - Text editor for `.edit` command
+- `DUCKDB_EDITOR` - DuckDB-specific editor (overrides `EDITOR` and `VISUAL`)
+
+Example:
+
+```bash
+export DUCKDB_PAGER="less -SRX"
+export DUCKDB_EDITOR="vim"
+duckdb mydata.db
+```

@@ -1,0 +1,106 @@
+---
+title: Extensions Overview
+description: Understanding DuckDB's extension system architecture
+---
+
+## What are DuckDB Extensions?
+
+DuckDB extensions are libraries containing additional functionality separate from the main codebase. Extensions provide added capabilities that can/should not live in DuckDB's core for various reasons, such as:
+
+- Keeping the core codebase smaller and less complex
+- Managing licensing requirements
+- Providing specialized functionality for specific use cases
+- Enabling community-contributed features
+
+## Extension Loading Methods
+
+Extensions can be integrated into DuckDB in two ways:
+
+### Static Linking
+
+Extensions can be statically linked into DuckDB's executables (CLI, unittest binary, benchmark runner, etc.). Statically linked extensions are automatically available when using these binaries without requiring additional installation steps.
+
+### Dynamic Loading
+
+DuckDB has an extension loading mechanism to dynamically load extension binaries at runtime. This allows you to:
+
+- Install extensions on-demand
+- Keep your DuckDB installation lean
+- Update extensions independently of the core database
+
+## Extension Types
+
+DuckDB extensions are divided into different types based on where they live and who maintains them.
+
+### In-Tree Extensions
+
+In-tree extensions live in the main DuckDB repository. These extensions are:
+
+- Considered fundamental to DuckDB
+- Tie deeply into DuckDB internals
+- Expected to be affected by core DuckDB changes
+- Maintained by the DuckDB team
+
+The DuckDB team aims to keep the number of in-tree extensions to a minimum and strives to move extensions out-of-tree where possible.
+
+**Examples of in-tree extensions:**
+- `parquet` - Parquet file format support
+- `json` - JSON data type and functions
+- `icu` - International Components for Unicode (collation, timezones)
+- `autocomplete` - SQL autocomplete functionality
+- `tpch` - TPC-H benchmark data generator
+- `tpcds` - TPC-DS benchmark data generator
+
+### Out-of-Tree Extensions (OOTEs)
+
+Out-of-tree extensions live in separate repositories outside the main DuckDB repository. Moving extensions out-of-tree helps:
+
+- Keep the core DuckDB codebase smaller
+- Manage licensing requirements separately
+- Enable independent development cycles
+
+#### DuckDB Managed OOTEs
+
+These extensions are:
+- Distributed through the main DuckDB CI
+- Signed using DuckDB's signing key
+- Maintained by the DuckDB team
+- Automatically distributed with every DuckDB release
+
+**Examples:**
+- `sqlite_scanner` - Read SQLite databases
+- `postgres_scanner` - Read PostgreSQL databases
+
+You can find the current list of DuckDB managed OOTEs in `.github/config/out_of_tree_extensions.cmake` in the DuckDB repository.
+
+#### External OOTEs
+
+These extensions are:
+- Not tied to the DuckDB CI
+- Running CI/CD in their own repositories
+- Maintained by external contributors
+- May or may not be signed, depending on the maintainer
+
+The extension maintainer is responsible for testing, distribution, and ensuring an up-to-date version is available.
+
+## Extension Architecture
+
+All types of extensions are built the same way:
+
+1. Using DuckDB's root `CMakeLists.txt` as the root CMake file
+2. Passing the extensions to build as parameters
+3. Configuring how each extension should be built (loadable binary, linked into binaries, etc.)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Extensions" icon="cube" href="/extensions/core-extensions">
+    Learn about the core extensions included with DuckDB
+  </Card>
+  <Card title="Loading Extensions" icon="download" href="/extensions/loading">
+    Install and load extensions at runtime
+  </Card>
+  <Card title="Building Extensions" icon="hammer" href="/extensions/building">
+    Build custom extensions from source
+  </Card>
+</CardGroup>

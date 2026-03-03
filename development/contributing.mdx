@@ -1,0 +1,697 @@
+---
+title: Contributing Guidelines
+description: Learn how to contribute to DuckDB development
+---
+
+We welcome contributions to DuckDB! This guide covers the contribution workflow, coding standards, and best practices.
+
+## Code of Conduct
+
+This project is governed by a [Code of Conduct](https://github.com/duckdb/duckdb/blob/main/CODE_OF_CONDUCT.md). By participating, you agree to uphold this code.
+
+Report unacceptable behavior to [quack@duckdb.org](mailto:quack@duckdb.org).
+
+## Getting Started
+
+### Before You Start
+
+<Steps>
+
+<Step title="Check for existing issues">
+
+Search [GitHub Issues](https://github.com/duckdb/duckdb/issues) to see if your bug or feature has been reported.
+
+</Step>
+
+<Step title="Discuss with the core team">
+
+For new features or significant changes:
+- Comment on the relevant issue
+- Announce your intention to work on it
+- Discuss your approach with maintainers
+
+</Step>
+
+<Step title="Avoid large pull requests">
+
+<Warning>
+Large PRs are much less likely to be merged due to review complexity. Break work into smaller, focused changes.
+</Warning>
+
+</Step>
+
+</Steps>
+
+## Reporting Bugs
+
+### Creating a Bug Report
+
+<Steps>
+
+<Step title="Search existing issues">
+
+Check if the bug is already reported in [Issues](https://github.com/duckdb/duckdb/issues).
+
+</Step>
+
+<Step title="Open a new issue">
+
+If not found, [open a new issue](https://github.com/duckdb/duckdb/issues/new/choose) with:
+
+- **Clear title** describing the problem
+- **Detailed description** of the issue
+- **Code sample** demonstrating the bug
+- **Expected behavior** vs actual behavior
+- **Environment details** (OS, DuckDB version)
+
+</Step>
+
+</Steps>
+
+### Example Bug Report
+
+**Title**: Bug: COUNT(\*) returns incorrect value with NULL values
+
+**Description**: COUNT(\*) returns incorrect results when table contains NULL values.
+
+**Reproduction**:
+```sql
+CREATE TABLE test(i INTEGER);
+INSERT INTO test VALUES (1), (NULL), (2);
+SELECT COUNT(*) FROM test;
+-- Returns: 2
+-- Expected: 3
+```
+
+**Environment**:
+- DuckDB v0.9.2
+- macOS 13.0
+- Python client
+
+## Pull Request Workflow
+
+### Before Opening a PR
+
+<Steps>
+
+<Step title="Create a fork">
+
+Do not commit directly to the main branch:
+
+```bash
+# Fork the repo on GitHub, then:
+git clone https://github.com/YOUR_USERNAME/duckdb.git
+cd duckdb
+git remote add upstream https://github.com/duckdb/duckdb.git
+```
+
+</Step>
+
+<Step title="Create a feature branch">
+
+```bash
+git checkout -b fix-count-with-nulls
+```
+
+</Step>
+
+<Step title="Make your changes">
+
+Implement your fix or feature following the coding standards below.
+
+</Step>
+
+<Step title="Add tests">
+
+Add a test case to prevent regression:
+
+```sql
+# test/sql/aggregate/test_count_nulls.test
+statement ok
+CREATE TABLE test(i INTEGER);
+
+statement ok
+INSERT INTO test VALUES (1), (NULL), (2);
+
+query I
+SELECT COUNT(*) FROM test;
+----
+3
+```
+
+</Step>
+
+<Step title="Format your code">
+
+```bash
+make format-fix
+```
+
+<Note>
+Use clang-format version 11.0.1:
+```bash
+pip install clang-format==11.0.1
+```
+</Note>
+
+</Step>
+
+<Step title="Run tests locally">
+
+```bash
+make unit      # Fast tests
+make allunit   # All tests (required before PR)
+```
+
+</Step>
+
+</Steps>
+
+### Opening the Pull Request
+
+<Steps>
+
+<Step title="Run CI on your fork first">
+
+<Warning>
+Do NOT open Draft PRs. Run CI on your fork before opening a PR.
+</Warning>
+
+Enable GitHub Actions on your fork:
+
+```bash
+# Fetch and push tags for versioning
+git fetch upstream --tags
+git push origin --tags
+
+# Push your branch
+git push origin fix-count-with-nulls
+```
+
+CI will run automatically.
+
+</Step>
+
+<Step title="Ensure CI passes">
+
+Wait for all checks to pass on your fork before opening a PR.
+
+</Step>
+
+<Step title="Create the pull request">
+
+Go to GitHub and create a PR with:
+
+**Title:** Clear, descriptive summary
+
+**Description:**
+- Problem being solved
+- Solution approach  
+- Related issue number (e.g., "Fixes #1234")
+- Test coverage added
+
+</Step>
+
+</Steps>
+
+### PR Description Template
+
+```markdown
+## Fix COUNT(*) with NULL values
+
+**Problem:**
+COUNT(*) was incorrectly filtering NULL values, returning count of non-NULL rows instead of all rows.
+
+**Solution:**
+Updated COUNT(*) implementation to include NULL values in the count.
+
+**Testing:**
+- Added test case in `test/sql/aggregate/test_count_nulls.test`
+- Verified existing COUNT tests still pass
+- Tested with edge cases (all NULLs, no NULLs, mixed)
+
+Fixes #1234
+```
+
+### After Opening
+
+<Steps>
+
+<Step title="Monitor CI results">
+
+If CI fails:
+1. Check if failure is related to your changes
+2. Run `make format-fix` and `generate-files` if needed
+3. Merge latest main if behind
+4. Fix issues and push updates
+
+</Step>
+
+<Step title="Address review feedback">
+
+Respond to reviewer comments:
+- Make requested changes
+- Explain your reasoning if you disagree
+- Push updates (don't force push)
+
+</Step>
+
+<Step title="Merge main frequently">
+
+```bash
+git fetch upstream
+git merge upstream/main
+git push origin fix-count-with-nulls
+```
+
+</Step>
+
+</Steps>
+
+## Coding Standards
+
+### C++ Guidelines
+
+#### Memory Management
+
+```cpp
+// ✅ Prefer smart pointers
+auto table = make_unique<Table>();
+
+// ✅ Use unique_ptr by default
+unique_ptr<Operator> op;
+
+// ⚠️ Only use shared_ptr if absolutely necessary
+shared_ptr<Resource> resource;
+
+// ❌ Avoid raw new/delete
+Table *table = new Table();  // NO!
+```
+
+#### Type Usage
+
+```cpp
+// ✅ Use fixed-width types
+int32_t count;
+uint64_t size;
+idx_t index;  // For offsets/indices (not size_t)
+
+// ❌ Avoid platform-dependent types  
+int count;    // NO!
+long size;    // NO!
+size_t idx;   // NO! Use idx_t
+```
+
+#### Const Correctness
+
+```cpp
+// ✅ Use const wherever possible
+void Process(const vector<Value> &values) {
+    for (const auto &val : values) {
+        // ...
+    }
+}
+
+// ✅ Const member functions
+idx_t GetCount() const { return count; }
+
+// ✅ Const references for non-trivial arguments
+void SetName(const string &name) { this->name = name; }
+```
+
+#### Modern C++
+
+```cpp
+// ✅ Use range-based for loops
+for (const auto &item : items) {
+    ProcessItem(item);
+}
+
+// ✅ Use override/final, not virtual
+void Execute() override;        // Overriding virtual method
+void Process() final;           // Final override
+
+// ✅ Use braces for all control structures
+if (condition) {
+    DoSomething();
+}
+
+// ❌ Don't use single-line if
+if (condition) DoSomething();   // NO!
+```
+
+#### Namespace Usage
+
+```cpp
+// ✅ All code in duckdb namespace
+namespace duckdb {
+
+void MyFunction() {
+    // ...
+}
+
+}  // namespace duckdb
+
+// ❌ Never import namespaces
+using namespace std;  // NO!
+```
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|-----------|----------|
+| **Files** | lowercase with underscores | `abstract_operator.cpp` |
+| **Types** | CamelCase (uppercase first) | `BaseColumn`, `LogicalOperator` |
+| **Functions** | CamelCase (uppercase first) | `GetChunk()`, `ProcessRow()` |
+| **Variables** | lowercase with underscores | `chunk_size`, `row_count` |
+| **Constants** | constexpr with name | `constexpr idx_t STANDARD_VECTOR_SIZE = 2048;` |
+
+### Class Layout
+
+```cpp
+class MyClass {
+public:
+    // Constructor first
+    MyClass();
+    
+    // Public variables
+    int my_public_variable;
+
+public:
+    // Public methods
+    void MyFunction();
+    
+private:
+    // Private methods
+    void MyPrivateFunction();
+    
+private:
+    // Private variables
+    int my_private_variable;
+};
+```
+
+### Error Handling
+
+#### Exceptions vs Returns
+
+```cpp
+// ✅ Use exceptions for query-terminating errors
+if (!table_exists) {
+    throw CatalogException("Table '%s' does not exist", name);
+}
+
+// ✅ Use return values for expected errors
+bool TryParse(const string &input, Value &result) {
+    if (!IsValid(input)) {
+        return false;  // Expected failure
+    }
+    result = Parse(input);
+    return true;
+}
+```
+
+#### Assertions
+
+```cpp
+// ✅ Use D_ASSERT for internal invariants
+D_ASSERT(index < vector_size);  // Programmer error if false
+D_ASSERT(!buffer.empty());      // Should never happen
+
+// ✅ Add comments explaining assertions
+D_ASSERT(ptr != nullptr);  // Buffer should have been allocated in Initialize()
+
+// ❌ Never assert on user input
+D_ASSERT(age > 0);  // NO! User can provide negative age
+```
+
+### Code Quality
+
+#### Avoid Magic Numbers
+
+```cpp
+// ❌ Magic numbers
+if (size > 100) { ... }
+
+// ✅ Named constants
+constexpr idx_t DEFAULT_BATCH_SIZE = 100;
+if (size > DEFAULT_BATCH_SIZE) { ... }
+```
+
+#### Early Returns
+
+```cpp
+// ✅ Return early to reduce nesting
+void Process(Value &value) {
+    if (!value.IsValid()) {
+        return;
+    }
+    if (value.IsNull()) {
+        return;
+    }
+    // Main logic here
+}
+
+// ❌ Deep nesting
+void Process(Value &value) {
+    if (value.IsValid()) {
+        if (!value.IsNull()) {
+            // Main logic nested
+        }
+    }
+}
+```
+
+#### No Commented Code
+
+```cpp
+// ❌ Don't commit commented-out code
+void MyFunction() {
+    DoSomething();
+    // OldApproach();  // NO!
+    // AnotherOldThing();  // NO!
+}
+
+// ✅ Remove it - Git tracks history
+void MyFunction() {
+    DoSomething();
+}
+```
+
+## Testing Requirements
+
+### Test Coverage
+
+<Steps>
+
+<Step title="Add tests for all changes">
+
+Every bug fix and feature requires tests:
+
+```sql
+# test/sql/myfeature/basic.test
+statement ok
+CREATE TABLE test(i INTEGER);
+
+query I
+SELECT my_new_feature(i) FROM test;
+----
+expected_result
+```
+
+</Step>
+
+<Step title="Test multiple data types">
+
+```sql
+# Test with different types
+query I
+SELECT my_function(42);
+----
+result
+
+query R  
+SELECT my_function(3.14);
+----
+result
+
+query T
+SELECT my_function('hello');
+----
+result
+```
+
+</Step>
+
+<Step title="Test error conditions">
+
+```sql
+statement error Division by zero
+SELECT 1 / 0;
+
+statement error Column 'invalid' does not exist
+SELECT invalid FROM test;
+```
+
+</Step>
+
+</Steps>
+
+### Test Organization
+
+- **Prefer SQL logic tests** over C++ tests
+- **Fast tests** in `.test` files (run with `make unit`)
+- **Slow tests** in `.test_slow` files (run with `make allunit`)
+- **Cover all code paths** - check coverage reports
+
+## Formatting
+
+### Running the Formatter
+
+```bash
+# Format all code
+make format-fix
+
+# Check formatting without changes
+make format-check
+
+# Format only your changes
+make format-changes
+```
+
+### Formatting Rules
+
+- **Tabs for indentation, spaces for alignment**
+- **120 character line limit**
+- **clang-format 11.0.1** required:
+  ```bash
+  pip install clang-format==11.0.1
+  ```
+
+### EditorConfig
+
+Use the included `.editorconfig` for automatic formatting in your editor.
+
+## Generative AI Policy
+
+<Warning>
+**Do not submit AI-generated pull requests.**
+
+Reviewing AI-generated code places a significant burden on maintainers. PRs identified as AI-generated will be closed.
+</Warning>
+
+## Review Process
+
+### What to Expect
+
+1. **Initial review**: Maintainers will review your PR
+2. **Feedback**: You may be asked to make changes
+3. **Iteration**: Respond to feedback and update PR
+4. **Approval**: Once approved, a maintainer will merge
+
+### Acceptance Criteria
+
+PRs must:
+- ✅ Pass all CI checks
+- ✅ Include tests
+- ✅ Follow coding standards
+- ✅ Be properly formatted (`make format-fix`)
+- ✅ Have clear commit messages
+- ✅ Include documentation for new features
+
+<Note>
+Maintainers reserve final discretion on whether to merge a PR. Following these guidelines does not guarantee acceptance, but significantly increases the likelihood.
+</Note>
+
+## Git Workflow
+
+### Commit Messages
+
+Write clear, descriptive commit messages:
+
+```bash
+# ✅ Good commit message
+git commit -m "Fix COUNT(*) to include NULL values
+
+COUNT(*) was incorrectly excluding NULL rows. Updated implementation
+to count all rows regardless of NULL values, matching SQL standard.
+
+Fixes #1234"
+
+# ❌ Poor commit message  
+git commit -m "fix bug"  # Too vague!
+```
+
+### Merging Main
+
+Keep your branch up to date:
+
+```bash
+# Fetch latest changes
+git fetch upstream
+
+# Merge main into your branch
+git merge upstream/main
+
+# Resolve conflicts if needed
+git add .
+git commit -m "Merge main"
+
+# Push updates
+git push origin your-branch
+```
+
+### Force Push Policy
+
+<Warning>
+**Avoid force pushing** unless absolutely necessary. If you must:
+- Only force push to your own fork
+- Never force push to main/master
+- Communicate with reviewers first
+</Warning>
+
+## Outside Contributors
+
+### Getting Started as an External Contributor
+
+1. **Start small**: Begin with small, focused contributions
+2. **Discuss first**: Talk to maintainers about larger changes
+3. **Avoid large PRs**: They're unlikely to be merged
+4. **Announce your work**: Comment on issues you're working on
+5. **Be patient**: Reviews may take time
+
+### Building Trust
+
+- Start with bug fixes or documentation
+- Demonstrate understanding of codebase
+- Follow guidelines consistently
+- Respond promptly to feedback
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="Building" icon="hammer" href="/development/building">
+    Build DuckDB from source
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Test your changes
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/development/architecture">
+    Understand the codebase
+  </Card>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/duckdb/duckdb/issues">
+    Browse open issues
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you need help:
+
+- **GitHub Issues**: Ask questions on relevant issues
+- **Discord**: Join the [DuckDB Discord](https://discord.gg/tcvwpjfnZx)
+- **Documentation**: Check [DuckDB docs](https://duckdb.org/docs/)
+
+<Note>
+Be respectful, patient, and follow the Code of Conduct. We're here to help!
+</Note>

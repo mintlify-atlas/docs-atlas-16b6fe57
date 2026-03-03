@@ -1,0 +1,508 @@
+---
+title: Python API Examples
+description: Complete examples for using DuckDB's Python API
+---
+
+# Python API Examples
+
+This guide provides comprehensive examples of using DuckDB's Python API, including basic SQL operations, integration with pandas and NumPy, and the relational API.
+
+## Installation
+
+Install DuckDB using pip:
+
+```bash
+pip install duckdb
+```
+
+For development or specific versions:
+
+```bash
+pip install duckdb==0.10.0
+```
+
+## Basic SQL API
+
+### Creating a Connection
+
+```python
+import duckdb
+
+# Connect to an in-memory database
+conn = duckdb.connect()
+
+# Or connect to a persistent database
+# conn = duckdb.connect('my_database.db')
+```
+
+### Creating Tables and Inserting Data
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+
+# Create a table
+conn.execute("CREATE TABLE test_table (i INTEGER, j STRING)")
+
+# Insert single row
+conn.execute("INSERT INTO test_table VALUES (1, 'one')")
+
+# Use placeholders for parameters
+conn.execute("INSERT INTO test_table VALUES (?, ?)", [2, 'two'])
+
+# Insert multiple rows with executemany()
+conn.executemany("INSERT INTO test_table VALUES (?, ?)", 
+                 [[3, 'three'], [4, 'four']])
+```
+
+### Querying Data
+
+```python
+# Fetch as pandas DataFrame
+df = conn.execute("SELECT * FROM test_table").fetchdf()
+print(df)
+
+# Fetch as NumPy arrays (better for handling NULLs)
+arrays = conn.execute("SELECT * FROM test_table").fetchnumpy()
+print(arrays)
+
+# Fetch one row at a time
+result = conn.execute("SELECT * FROM test_table")
+row = result.fetchone()
+print(row)
+
+# Fetch all rows
+rows = conn.execute("SELECT * FROM test_table").fetchall()
+print(rows)
+```
+
+## Integration with Pandas
+
+### Querying Pandas DataFrames
+
+```python
+import duckdb
+import pandas as pd
+
+conn = duckdb.connect()
+
+# Create a pandas DataFrame
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4], 
+    "j": ["one", "two", "three", "four"]
+})
+
+# Register DataFrame as a virtual table
+conn.register("test_df", test_df)
+
+# Query the DataFrame using SQL
+result = conn.execute("SELECT j FROM test_df WHERE i > 1").fetchdf()
+print(result)
+```
+
+### Direct DataFrame Queries
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+# Query DataFrame directly without explicit registration
+result = duckdb.query_df(test_df, 'my_df', 'SELECT * FROM my_df WHERE i > 2')
+print(result.df())
+```
+
+## Relational API
+
+The relational API provides a programmatic way to build queries using lazy evaluation.
+
+### Creating Relations
+
+```python
+import duckdb
+import pandas as pd
+
+conn = duckdb.connect()
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+# Create relation from DataFrame
+rel = conn.from_df(test_df)
+print(rel)
+
+# Alternative: use built-in default connection
+rel = duckdb.df(test_df)
+print(rel)
+
+# Create relation from existing table
+conn.execute("CREATE TABLE test_table (i INTEGER, j STRING)")
+conn.executemany("INSERT INTO test_table VALUES (?, ?)",
+                [[1, 'one'], [2, 'two'], [3, 'three'], [4, 'four']])
+rel = conn.table("test_table")
+print(rel)
+```
+
+### Creating Relations from CSV
+
+```python
+import duckdb
+import pandas as pd
+import tempfile
+import os
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+# Create temporary CSV file
+temp_file_name = os.path.join(tempfile.mkdtemp(), 'data.csv')
+test_df.to_csv(temp_file_name, index=False)
+
+# Create relation from CSV
+rel = duckdb.from_csv_auto(temp_file_name)
+print(rel)
+```
+
+### Relation Metadata
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+conn.execute("CREATE TABLE test_table (i INTEGER, j STRING)")
+rel = conn.table("test_table")
+
+# Get relation alias
+print(rel.alias)  # 'test_table'
+
+# Change alias
+rel2 = rel.set_alias('new_alias')
+print(rel2.alias)  # 'new_alias'
+
+# Inspect relation type
+print(rel.type)
+
+# Get column names
+print(rel.columns)  # ['i', 'j']
+
+# Get column types
+print(rel.types)  # [INTEGER, VARCHAR]
+```
+
+### Filtering and Projection
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = duckdb.df(test_df)
+
+# Filter rows
+print(rel.filter('i > 1'))
+
+# Project specific columns
+print(rel.project('i, j'))
+
+# Transform columns
+print(rel.project('i + 1'))
+```
+
+### Sorting and Limiting
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = duckdb.df(test_df)
+
+# Order results
+print(rel.order('j'))
+
+# Limit rows
+print(rel.limit(2))
+
+# Skip rows and limit
+print(rel.limit(2, offset=1))
+```
+
+### Method Chaining
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = duckdb.df(test_df)
+
+# Chain multiple operations
+result = rel.filter('i > 1').project('i + 1, j').order('j').limit(2)
+print(result)
+```
+
+### Aggregation
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = duckdb.df(test_df)
+
+# Simple aggregation
+print(rel.aggregate("sum(i)"))
+
+# Aggregation with implicit grouping
+print(rel.aggregate("j, sum(i)"))
+
+# Explicit grouping
+print(rel.aggregate("sum(i)", "j"))
+
+# Distinct values
+print(rel.distinct())
+```
+
+### Multi-Relation Operations
+
+```python
+import duckdb
+import pandas as pd
+
+conn = duckdb.connect()
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = conn.from_df(test_df)
+rel2 = conn.from_df(test_df)
+
+# Union
+print(rel.union(rel))
+
+# Join on column
+print(rel.join(rel2, 'i'))
+
+# Join with explicit condition
+print(rel.set_alias('a').join(rel.set_alias('b'), 'a.i=b.i'))
+```
+
+### Shorthand Methods on DataFrames
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+# Direct operations on DataFrames
+print(duckdb.filter(test_df, 'i > 1'))
+print(duckdb.project(test_df, 'i + 1'))
+print(duckdb.order(test_df, 'j'))
+print(duckdb.limit(test_df, 2))
+print(duckdb.aggregate(test_df, "sum(i)"))
+print(duckdb.distinct(test_df))
+
+# Chaining (first call includes DataFrame parameter)
+print(duckdb.filter(test_df, 'i > 1').project('i + 1, j').order('j').limit(2))
+```
+
+### Converting Relations to Other Formats
+
+```python
+import duckdb
+import pandas as pd
+
+conn = duckdb.connect()
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = conn.from_df(test_df)
+
+# Execute and get query result
+res = rel.execute()
+print(res.fetchone())
+print(res.fetchall())
+
+# Convert to pandas DataFrame
+print(rel.to_df())
+
+# Shorthand for to_df()
+print(rel.df())
+```
+
+### Creating Tables from Relations
+
+```python
+import duckdb
+import pandas as pd
+
+conn = duckdb.connect()
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = conn.from_df(test_df)
+
+# Create table from relation
+rel.create("test_table2")
+
+# Insert into existing table
+conn.execute("CREATE TABLE test_table3 (i INTEGER, j STRING)")
+rel.insert_into("test_table3")
+
+# Insert single values
+conn.values([5, 'five']).insert_into("test_table3")
+
+# Insert using relation method
+rel_3 = conn.table("test_table3")
+rel_3.insert([6, 'six'])
+
+# Create view from relation
+rel.create_view('test_view')
+```
+
+### Querying Relations with SQL
+
+```python
+import duckdb
+import pandas as pd
+
+test_df = pd.DataFrame.from_dict({
+    "i": [1, 2, 3, 4],
+    "j": ["one", "two", "three", "four"]
+})
+
+rel = duckdb.df(test_df)
+
+# Run SQL on relation (first parameter is the view name)
+res = rel.query('my_name_for_rel', 'SELECT * FROM my_name_for_rel')
+print(res.fetchone())
+print(res.fetchdf())
+
+# Shorthand for fetchdf()
+print(res.df())
+
+# Query DataFrames directly
+res = duckdb.query_df(test_df, 'my_name_for_test_df', 
+                      'SELECT * FROM my_name_for_test_df')
+print(res.df())
+```
+
+## Complete Working Example
+
+Here's a comprehensive example combining multiple features:
+
+```python
+import duckdb
+import pandas as pd
+
+# Create connection
+conn = duckdb.connect()
+
+# Create and populate table
+conn.execute("CREATE TABLE sales(product VARCHAR, quantity INTEGER, price DOUBLE)")
+conn.executemany(
+    "INSERT INTO sales VALUES (?, ?, ?)",
+    [
+        ['Widget', 10, 19.99],
+        ['Gadget', 5, 49.99],
+        ['Widget', 15, 19.99],
+        ['Doohickey', 3, 99.99],
+        ['Gadget', 8, 49.99]
+    ]
+)
+
+# Query with aggregation
+result = conn.execute("""
+    SELECT product, 
+           SUM(quantity) as total_quantity,
+           AVG(price) as avg_price,
+           SUM(quantity * price) as total_revenue
+    FROM sales
+    GROUP BY product
+    ORDER BY total_revenue DESC
+""").fetchdf()
+
+print(result)
+
+# Use relational API for the same query
+rel = conn.table('sales')
+rel_result = rel.aggregate(
+    'product, SUM(quantity) as total_quantity, AVG(price) as avg_price, SUM(quantity * price) as total_revenue',
+    'product'
+).order('total_revenue DESC')
+
+print(rel_result.df())
+```
+
+## Working with Cursors (PEP 249)
+
+DuckDB supports the Python DB-API specification:
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+cursor = conn.cursor()
+
+# Note: cursor is optional and fully redundant
+# You can use execute() directly on the connection
+cursor.execute("CREATE TABLE test (i INTEGER)")
+cursor.execute("INSERT INTO test VALUES (?)", [42])
+result = cursor.execute("SELECT * FROM test").fetchall()
+print(result)
+```
+
+## Error Handling
+
+```python
+import duckdb
+
+conn = duckdb.connect()
+
+try:
+    conn.execute("SELECT * FROM nonexistent_table")
+except duckdb.Error as e:
+    print(f"Database error: {e}")
+```
+
+## Additional Resources
+
+- [Python API Reference](/api/python/overview)
+- [Data Ingestion](/api/python/data-ingestion)
+- [Result Conversion](/api/python/result-conversion)
+- [Relational API](/api/python/relational-api)
+- [NumPy Integration](/api/python/numpy)
+- [Apache Arrow Integration](/api/python/arrow)
